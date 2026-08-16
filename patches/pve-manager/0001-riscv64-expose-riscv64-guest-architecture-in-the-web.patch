@@ -1,0 +1,242 @@
+From 2e92b6f070245374efc721053535f18b8509cb5f Mon Sep 17 00:00:00 2001
+From: daemonhorn <dhorn2000@gmail.com>
+Date: Sat, 15 Aug 2026 20:56:41 -0400
+Subject: [PATCH] riscv64: expose riscv64 guest architecture in the web UI
+
+Adds riscv64 to the architecture selector and wires up its defaults so
+the UI offers a coherent configuration for it.
+
+Defaults mirror aarch64 where the constraints are shared -- OVMF-only
+firmware, the virt machine type, no IDE bus -- since both use QEMU's
+virt machine.
+
+The default processor model is 'max' rather than 'host'. riscv64 guests
+run under TCG on x86_64 hosts, where 'host' is not meaningful; 'max'
+exposes every extension the emulator supports. This matches
+get_default_cpu_type('riscv64', 0) in qemu-server, and the two must stay
+in sync.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015sQUuNrGk7QcVLxJHWmcme
+---
+ debian/changelog                      | 10 ++++++++
+ www/manager6/Utils.js                 |  2 +-
+ www/manager6/form/CPUModelSelector.js | 37 +++++++++++++++++++--------
+ www/manager6/qemu/Architecture.js     | 21 ++++++++++++++-
+ www/manager6/qemu/OSDefaults.js       | 23 +++++++++++++++++
+ 5 files changed, 81 insertions(+), 12 deletions(-)
+
+diff --git a/debian/changelog b/debian/changelog
+index abc433e4..0b59c0d2 100644
+--- a/debian/changelog
++++ b/debian/changelog
+@@ -1,3 +1,13 @@
++pve-manager (9.2.10+riscv1) trixie; urgency=medium
++
++  * Add riscv64 guest support to the web UI: architecture selection, default
++    processor model, machine types, firmware and bus/controller options.
++
++  * Locally versioned (+riscv1) so these packages are distinguishable from,
++    and sort newer than, the stock Proxmox packages of the same version.
++
++ -- Proxmox riscv64 support <support@proxmox.com>  Sat, 15 Aug 2026 18:31:53 -0400
++
+ pve-manager (9.2.10) trixie; urgency=medium
+ 
+   * pveperf: make bogomips regular expression case insensitive, other
+diff --git a/www/manager6/Utils.js b/www/manager6/Utils.js
+index 040b5ae0..8c797309 100644
+--- a/www/manager6/Utils.js
++++ b/www/manager6/Utils.js
+@@ -546,7 +546,7 @@ Ext.define('PVE.Utils', {
+ 
+         render_qemu_bios: function (value, arch = 'x86_64') {
+             if (!value) {
+-                let defaultBios = arch === 'aarch64' ? 'OVMF (UEFI)' : 'SeaBIOS';
++                let defaultBios = arch === 'aarch64' || arch === 'riscv64' ? 'OVMF (UEFI)' : 'SeaBIOS';
+                 return `${Proxmox.Utils.defaultText} (${defaultBios})`;
+             } else if (value === 'seabios') {
+                 return 'SeaBIOS';
+diff --git a/www/manager6/form/CPUModelSelector.js b/www/manager6/form/CPUModelSelector.js
+index c6678d51..768e92cc 100644
+--- a/www/manager6/form/CPUModelSelector.js
++++ b/www/manager6/form/CPUModelSelector.js
+@@ -111,19 +111,36 @@ Ext.define('PVE.form.CPUModelSelector', {
+ 
+     validator: function (value) {
+         let me = this;
+-        if (me.arch !== 'aarch64' || !me.kvm || !value || value.startsWith('custom-')) {
++        if (!me.kvm || !value || value.startsWith('custom-')) {
+             return true;
+         }
+-        if (['host', 'max', 'cortex-a53', 'cortex-a57'].includes(value)) {
+-            return true;
++        if (me.arch === 'aarch64') {
++            if (['host', 'max', 'cortex-a53', 'cortex-a57'].includes(value)) {
++                return true;
++            }
++            return Ext.String.format(
++                gettext(
++                    "The CPU model '{0}' is not usable with KVM on ARM; choose 'host' or 'max'," +
++                        ' or disable KVM.',
++                ),
++                value,
++            );
++        }
++        if (me.arch === 'riscv64') {
++            // Only reachable if a future riscv64-on-riscv64-KVM host is used; this PVE version
++            // otherwise always runs riscv64 guests under TCG (me.kvm is forced off in that case).
++            if (['host', 'max'].includes(value)) {
++                return true;
++            }
++            return Ext.String.format(
++                gettext(
++                    "The CPU model '{0}' is not usable with KVM on RISC-V; choose 'host' or" +
++                        " 'max', or disable KVM.",
++                ),
++                value,
++            );
+         }
+-        return Ext.String.format(
+-            gettext(
+-                "The CPU model '{0}' is not usable with KVM on ARM; choose 'host' or 'max'," +
+-                    ' or disable KVM.',
+-            ),
+-            value,
+-        );
++        return true;
+     },
+ 
+     store: {
+diff --git a/www/manager6/qemu/Architecture.js b/www/manager6/qemu/Architecture.js
+index 7b6ef402..5bd2c530 100644
+--- a/www/manager6/qemu/Architecture.js
++++ b/www/manager6/qemu/Architecture.js
+@@ -1,5 +1,5 @@
+ /* This file defines the helpers, defaults and limits for various vCPU architectures, such
+- * as x86_64, and aarch64.
++ * as x86_64, aarch64, and riscv64.
+  *
+  * To add a new architecture, add the respective entry in the defaults/renderers and selection.
+  */
+@@ -10,6 +10,7 @@ Ext.define('PVE.qemu.Architecture', {
+         ['__default__', `${Proxmox.Utils.defaultText} (${gettext('Host Architecture')})`],
+         ['x86_64', gettext('x86 (64-bit)')],
+         ['aarch64', gettext('ARM (64-bit)')],
++        ['riscv64', gettext('RISC-V (64-bit)')],
+     ],
+ 
+     // filter for PVE.Utils.kvm_ostypes
+@@ -22,21 +23,33 @@ Ext.define('PVE.qemu.Architecture', {
+             bases: ['Linux', 'Other'],
+             ostypes: ['l26', 'other'],
+         },
++        riscv64: {
++            bases: ['Linux', 'Other'],
++            ostypes: ['l26', 'other'],
++        },
+     },
+ 
+     defaultProcessorModel: {
+         x86_64: 'x86-64-v2-AES',
+         aarch64: 'host',
++        // NOT 'host' like aarch64: aarch64's default assumes a native aarch64 host with KVM.
++        // riscv64 guests are currently only supported via TCG (no matching riscv64 KVM host),
++        // so 'host' is invalid here; 'max' (all TCG-emulatable extensions) is the correct
++        // analogue. Must match get_default_cpu_type('riscv64', 0) in CPUConfig.pm exactly, or
++        // the wizard creates VMs the backend then rejects.
++        riscv64: 'max',
+     },
+ 
+     defaultMachines: {
+         x86_64: 'pc',
+         aarch64: 'virt',
++        riscv64: 'virt',
+     },
+ 
+     defaultCDDrive: {
+         x86_64: ['ide', 2],
+         aarch64: ['scsi', 2],
++        riscv64: ['scsi', 2],
+     },
+ 
+     allowedScsiHw: {
+@@ -50,21 +63,25 @@ Ext.define('PVE.qemu.Architecture', {
+             'pvscsi',
+         ],
+         aarch64: ['virtio-scsi-pci', 'virtio-scsi-single'],
++        riscv64: ['virtio-scsi-pci', 'virtio-scsi-single'],
+     },
+ 
+     allowedMachines: {
+         x86_64: ['__default__', 'q35'], // __default__ is i440fx
+         aarch64: ['__default__'], // __default__ is virt
++        riscv64: ['__default__'], // __default__ is virt
+     },
+ 
+     allowedBusses: {
+         x86_64: ['ide', 'sata', 'virtio', 'scsi', 'unused'],
+         aarch64: ['sata', 'virtio', 'scsi', 'unused'],
++        riscv64: ['sata', 'virtio', 'scsi', 'unused'],
+     },
+ 
+     allowedFirmware: {
+         x86_64: ['__default__', 'seabios', 'ovmf'], // default is seabios
+         aarch64: ['ovmf'],
++        riscv64: ['ovmf'],
+     },
+ 
+     render_vcpu_architecture: function (value) {
+@@ -74,6 +91,8 @@ Ext.define('PVE.qemu.Architecture', {
+                 return gettext('x86 (64-bit)');
+             case 'aarch64':
+                 return gettext('ARM (64-bit)');
++            case 'riscv64':
++                return gettext('RISC-V (64-bit)');
+             default:
+                 return Proxmox.Utils.unknownText;
+         }
+diff --git a/www/manager6/qemu/OSDefaults.js b/www/manager6/qemu/OSDefaults.js
+index df5ad8aa..8841251a 100644
+--- a/www/manager6/qemu/OSDefaults.js
++++ b/www/manager6/qemu/OSDefaults.js
+@@ -67,6 +67,20 @@ Ext.define('PVE.qemu.OSDefaults', {
+                 scsihw: 'virtio-scsi-single',
+                 bios: 'ovmf',
+             },
++
++            riscv64: {
++                // same reasoning as aarch64: no ide, and ovmf can't boot from sata
++                busType: 'scsi',
++                networkCard: 'e1000',
++                busPriority: {
++                    scsi: 4,
++                    sata: 3,
++                    virtio: 2,
++                    ide: 1,
++                },
++                scsihw: 'virtio-scsi-single',
++                bios: 'ovmf',
++            },
+         };
+ 
+         // virtio-net is in kernel since 2.6.25
+@@ -93,6 +107,15 @@ Ext.define('PVE.qemu.OSDefaults', {
+                     },
+                     networkCard: 'virtio',
+                 },
++                riscv64: {
++                    busPriority: {
++                        scsi: 4,
++                        virtio: 2,
++                        sata: 2,
++                        ide: 1,
++                    },
++                    networkCard: 'virtio',
++                },
+             },
+         });
+ 
+-- 
+2.47.3
+

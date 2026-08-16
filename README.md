@@ -16,7 +16,19 @@ custom ISO built with these changes.
 | [pve-manager](https://github.com/daemonhorn/pve-manager) | Web UI: architecture selector and riscv64 defaults |
 | [pve-edk2-firmware](https://github.com/daemonhorn/pve-edk2-firmware) | TPM2 enabled for the RiscVVirt platform |
 
-All four carry a single commit on branch `feature/riscv64-guest-support`.
+All four carry a single commit on branch `feature/riscv64-guest-support`. The same diffs
+are also bundled as `git format-patch` output under [`patches/`](patches/), one directory
+per repo, for review or `git am` without cloning the individual forks.
+
+## Downloads
+
+The [Releases](../../releases) page carries the built artifacts, extracted from the
+package pool of the ISO that was installed onto real hardware and verified (see
+[RISCV64_RESULTS.md](RISCV64_RESULTS.md) §5):
+
+- `pve-riscv64-riscv2.iso` — installer ISO, md5 `b1d57da8a149bb36d55cd890209779bd`
+- The eight `+riscv1`/`+riscv2` `.deb` packages (`pve-qemu-kvm`, `qemu-server`,
+  `pve-manager`, and the five `pve-edk2-firmware*` packages)
 
 ## Documents
 
