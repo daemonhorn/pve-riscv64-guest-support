@@ -1,0 +1,49 @@
+Send order, top to bottom:
+
+1. RFC email to pve-devel (01-rfc-email.txt) - wait for signal before
+   sending anything else.
+2. File the bugzilla feature request (02-bugzilla-feature-request.txt) and
+   the two known-gap bugs (03-bugzilla-known-gaps.txt). Needs a
+   bugzilla.proxmox.com account.
+3. Standalone qemu-server TPM fix - this is a single patch, no cover
+   letter needed:
+
+     cd qemu-server
+     git format-patch -s -o outgoing/ master..539fd15e
+     # (539fd15e is the "fix: use sysbus TPM" commit on submit/riscv64-v1;
+     # use `git log --oneline master..submit/riscv64-v1` to find its
+     # current hash if the branch has been rebased since this was written)
+     git send-email --to=pve-devel@lists.proxmox.com outgoing/*.patch
+
+   This is a real, independent aarch64 bug fix - it doesn't need to wait
+   on anything else in this series, and getting it reviewed separately
+   de-risks the bigger series. Send it whenever ready, doesn't have to
+   wait for step 1's RFC response.
+4. pve-qemu series (04-cover-letter-pve-qemu.txt) once the RFC signal is
+   positive.
+5. Combined edk2-firmware/qemu-server/manager/docs series
+   (05-cover-letter-combined.txt) once 4 has landed or been acked.
+   IMPORTANT: this series' qemu-server portion is commits 1, 3, 4, 5, 6
+   on submit/riscv64-v1 - NOT commit 2 (the TPM fix), which was already
+   sent in step 3. Format only those five:
+
+     cd qemu-server
+     git format-patch -s -o outgoing/ --cover-letter \
+       539fd15e..submit/riscv64-v1
+     # this range is everything AFTER the TPM fix commit, i.e. commits
+     # 3-6 from the split (helpers/machine commit 1 is BEFORE the TPM fix
+     # and needs including too - use the two-range form instead:
+     git format-patch -s -o outgoing/ \
+       master..a39fc869 539fd15e..submit/riscv64-v1
+     # (a39fc869 = "helpers, machine: recognize riscv64 as a guest
+     # architecture", the commit right before the TPM fix)
+
+   Getting the exact commit range right matters - double check with
+   `git log --oneline master..submit/riscv64-v1` before formatting, since
+   these hashes will change if any commit is amended for review feedback.
+
+Every `git format-patch` above should be checked against
+`git log -1 --format='%B'` for each resulting patch to confirm the
+Signed-off-by trailer is present (format.signoff=true is already set
+locally in each repo, so `-s` is redundant but harmless as a belt-and-
+suspenders check).

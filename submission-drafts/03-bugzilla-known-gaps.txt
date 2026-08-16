@@ -1,0 +1,60 @@
+Two separate bugs, filed independently of the riscv64 feature request so
+each can be reviewed/fixed on its own merits. Reference both from the
+riscv64 series' cover letter as known, separately-tracked gaps.
+
+=========================================================================
+Bug A - affects aarch64 too, pre-existing, not riscv64-specific
+=========================================================================
+Summary: ide-cd emits bus=ide.N on virt-machine architectures, which have no IDE bus
+Severity: normal
+
+Description:
+
+DriveDevice.pm emits `-device ide-cd,bus=ide.$controller` unconditionally
+for CD-ROM drives, but QEMU's 'virt' machine (used by both aarch64 and
+riscv64 guests) has no IDE bus at all. Starting a VM with an ide* CD-ROM
+drive and arch=aarch64 or arch=riscv64 fails with:
+
+  Bus 'ide.1' not found
+
+This is reachable via the API/CLI (e.g. `qm set <vmid> --ide2 <volume>,media=cdrom`
+with arch=aarch64/riscv64) but not through the web UI, which already hides
+the IDE bus option for virt-machine architectures - so most users won't
+hit it, but it's a real gap for anyone scripting VM creation.
+
+It escaped the qemu-server test suite because the cfg2cmd fixtures compare
+generated QEMU command-line *strings* against golden files; they never
+actually launch QEMU, so a device QEMU itself would reject at runtime
+isn't caught. Worth a cfg2cmd fixture that would catch this once fixed
+(reject ide* at the API layer for virt-machine architectures, matching the
+web UI's existing behavior, or transparently remap it to the SATA/AHCI
+controller PVE already uses correctly for these architectures).
+
+=========================================================================
+Bug B - riscv64-specific, has a workaround
+=========================================================================
+Summary: riscv64 EDK2 firmware publishes ACPI but not FDT, breaking FDT-only guest OSes
+Severity: minor (workaround exists)
+
+Description:
+
+QEMU offers ACPI by default on the riscv64 'virt' machine, so
+PlatformHasAcpiDtDxe installs the ACPI protocol and FdtClientDxe never
+calls InstallConfigurationTable(&gFdtTableGuid, ...). Guest operating
+systems that require a device tree instead of ACPI - confirmed with
+FreeBSD 15.1-RELEASE riscv64 - fail to boot with:
+
+  No valid device tree blob found!
+
+Workaround without rebuilding firmware: `args: -machine acpi=off` in the
+VM config.
+
+Proper fix: rebuild pve-edk2-firmware's riscv64 target with
+PcdForceNoAcpi=TRUE so FDT is published instead of/alongside ACPI.
+Untried in this round of work - worth a go/no-go check on whether that PCD
+actually produces a bootable FDT-based image before committing to it.
+
+--
+NOTE for whoever files these: bugzilla.proxmox.com requires an account and
+picking the actual product/component taxonomy - fill those in before
+submitting, this draft only covers the description text.

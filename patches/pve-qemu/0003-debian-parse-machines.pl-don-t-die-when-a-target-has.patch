@@ -1,0 +1,46 @@
+From cd6c130ea233c00ab65505cbfac886ae84ff0b27 Mon Sep 17 00:00:00 2001
+From: daemonhorn <dhorn2000@gmail.com>
+Date: Sun, 16 Aug 2026 10:56:24 -0400
+Subject: [PATCH qemu 3/4] debian/parse-machines.pl: don't die when a target
+ has no versioned machines
+
+Unlike x86_64's pc-(i440fx|q35)-* and aarch64's virt-*, riscv64's
+virt machine (as of QEMU 11.0.3, confirmed via a real
+`qemu-system-riscv64 -machine help`) has no versioned variants at
+all - upstream hasn't opted that board into the MACHINE_VER_*
+deprecation macros used by
+0039-adapt-machine-version-deprecation-for-Proxmox-VE.patch. Zero
+matches is therefore an expected, legitimate outcome for riscv64, not
+a sign the script broke, so warn instead of dying - this also means a
+future arch/board addition without versioned machines won't hard-fail
+the build, while the empty result is still surfaced for visibility.
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+Signed-off-by: daemonhorn <dhorn2000@gmail.com>
+---
+ debian/parse-machines.pl | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/debian/parse-machines.pl b/debian/parse-machines.pl
+index a6c0e8d..87631ff 100755
+--- a/debian/parse-machines.pl
++++ b/debian/parse-machines.pl
+@@ -22,7 +22,14 @@ while (<STDIN>) {
+     };
+ }
+ 
+-die "no QEMU machine types detected from STDIN input" if scalar (@$machines) <= 0;
++# NOTE: unlike x86_64's pc-(i440fx|q35)-* and aarch64's virt-*, riscv64's virt machine (as of
++# QEMU 11.0.3, confirmed via a real `qemu-system-riscv64 -machine help`) has no versioned
++# variants at all - upstream hasn't opted that board into the MACHINE_VER_* deprecation macros
++# used by 0039-adapt-machine-version-deprecation-for-Proxmox-VE.patch, so zero matches here is
++# an expected, legitimate outcome for riscv64, not a sign this script broke. Warn instead of
++# dying so a future arch/board addition without versioned machines doesn't hard-fail the build,
++# while still surfacing the empty result for visibility.
++warn "no QEMU machine types detected from STDIN input\n" if scalar(@$machines) <= 0;
+ 
+ print to_json($machines, { utf8 => 1, canonical => 1 })
+     or die "failed to encode detected machines as JSON - $!\n";
+-- 
+2.47.3
+

@@ -1,0 +1,33 @@
+Subject: [pve-devel] [PATCH qemu 0/4] build riscv64-softmmu target and ship its firmware
+
+Send this one first, standalone - it's the foundational build-system
+change everything else in the riscv64 series depends on. The
+edk2-firmware/qemu-server/manager/docs series (sent separately, see
+05-cover-letter-combined.txt) references this series and should wait for
+it to land or at least be acked.
+
+--- cover letter body ---
+
+Adds riscv64-softmmu to --target-list and generates the machine-version
+and CPU-model metadata for it, mirroring x86_64 and aarch64. Building this
+target surfaced three real, build-breaking bugs in the existing
+debian/parse-*.pl scripts and one blob-purging bug that meant no riscv64
+guest could ever boot - see the individual commit messages for each.
+
+Patch 1/4 (the OpenSBI purge fix) is arguably independent of the other
+three and could land alone if reviewers prefer, but it only matters once
+riscv64-softmmu is actually built, so it's included here rather than sent
+separately.
+
+Verified: built this tree with riscv64-softmmu in the target list, ran
+the resulting qemu-system-riscv64 against a real Proxmox VE install, and
+confirmed a riscv64 guest boots OpenSBI and EDK2 UEFI firmware to the
+boot manager (needs the corresponding qemu-server/pve-edk2-firmware
+changes from the follow-up series to actually configure such a guest;
+this series alone just gets the binary and its metadata built).
+
+Patches:
+  1/4 fix: purge only the riscv32 OpenSBI blob, not riscv64's
+  2/4 debian/parse-cpu-models.pl: recognize riscv64 CPU models
+  3/4 debian/parse-machines.pl: don't die when a target has no versioned machines
+  4/4 debian/rules: build riscv64-softmmu and generate its machine/CPU-model metadata

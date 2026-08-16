@@ -1,0 +1,78 @@
+From 539fd15e73da1ab4b0e128ffdf0e5a4aa473f686 Mon Sep 17 00:00:00 2001
+From: daemonhorn <dhorn2000@gmail.com>
+Date: Sun, 16 Aug 2026 10:53:43 -0400
+Subject: [PATCH qemu-server 2/6] fix: use sysbus TPM (tpm-tis-device) on
+ virt-machine architectures
+
+tpm-tis is the ISA/LPC-attached TPM device, only valid on the x86_64
+'pc'/'q35' machines. virt-machine architectures have no ISA bus; they
+expose TPM via a sysbus MMIO region instead, wired up by the sysbus
+variant tpm-tis-device.
+
+Confirmed with real QEMU binaries (10.0.11):
+`qemu-system-aarch64 -M virt -device tpm-tis,help` reports "Device
+'tpm-tis' not found" - it isn't even compiled in for this target -
+while `-device tpm-tis-device,help` succeeds. This is a real,
+pre-existing bug: any aarch64 VM with tpmstate0 configured could never
+actually start. riscv64's 'virt' machine has the identical constraint,
+so add_tpm_device() now takes $arch and picks the right device model
+for it.
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+Signed-off-by: daemonhorn <dhorn2000@gmail.com>
+---
+ src/PVE/QemuServer.pm | 17 +++++++++++++----
+ 1 file changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/src/PVE/QemuServer.pm b/src/PVE/QemuServer.pm
+index 2f43faa7..e2d4c34e 100644
+--- a/src/PVE/QemuServer.pm
++++ b/src/PVE/QemuServer.pm
+@@ -57,7 +57,7 @@ use PVE::QemuServer::Blockdev;
+ use PVE::QemuServer::BlockJob;
+ use PVE::QemuServer::Cfg2Cmd;
+ use PVE::QemuServer::Helpers
+-    qw(config_aware_timeout get_iscsi_initiator_name get_host_arch min_version kvm_user_version windows_version);
++    qw(config_aware_timeout get_iscsi_initiator_name get_host_arch min_version kvm_user_version windows_version uses_virt_machine);
+ use PVE::QemuServer::Cloudinit;
+ use PVE::QemuServer::CGroup;
+ use PVE::QemuServer::CPUConfig qw(
+@@ -2853,7 +2853,7 @@ sub get_tpm_paths {
+ }
+ 
+ sub add_tpm_device {
+-    my ($vmid, $devices, $conf) = @_;
++    my ($vmid, $devices, $conf, $arch) = @_;
+ 
+     return if !$conf->{tpmstate0};
+ 
+@@ -2861,7 +2861,16 @@ sub add_tpm_device {
+ 
+     push @$devices, "-chardev", "socket,id=tpmchar,path=$paths->{socket}";
+     push @$devices, "-tpmdev", "emulator,id=tpmdev,chardev=tpmchar";
+-    push @$devices, "-device", "tpm-tis,tpmdev=tpmdev";
++    # tpm-tis is the ISA/LPC-attached TPM device, only valid on the x86_64 'pc'/'q35' machines.
++    # virt-machine archs (aarch64, riscv64) have no ISA bus; they expose TPM via a sysbus MMIO
++    # region instead, wired up by the sysbus variant tpm-tis-device. Confirmed with real QEMU
++    # binaries (10.0.11): `qemu-system-aarch64/-riscv64 -M virt -device tpm-tis,help` both report
++    # "Device 'tpm-tis' not found" (it isn't even compiled in for these targets), while
++    # `-device tpm-tis-device,help` succeeds on both - this was a real, pre-existing bug for
++    # aarch64 (any VM with tpmstate0 configured could never actually start), not just a
++    # theoretical wrong-bus concern.
++    my $tpm_device = uses_virt_machine($arch) ? 'tpm-tis-device' : 'tpm-tis';
++    push @$devices, "-device", "$tpm_device,tpmdev=tpmdev";
+ }
+ 
+ sub start_swtpm {
+@@ -3366,7 +3375,7 @@ sub config_to_command {
+ 
+     # Add a TPM only if the VM is not a template,
+     # to support backing up template VMs even if the TPM disk is write-protected.
+-    add_tpm_device($vmid, $devices, $conf) if !$is_template;
++    add_tpm_device($vmid, $devices, $conf, $arch) if !$is_template;
+ 
+     my $sockets = 1;
+     $sockets = $conf->{smp} if $conf->{smp}; # old style - no longer iused
+-- 
+2.47.3
+

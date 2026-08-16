@@ -15,10 +15,23 @@ custom ISO built with these changes.
 | [pve-qemu](https://github.com/daemonhorn/pve-qemu) | Builds `riscv64-softmmu`; CPU/machine metadata parsers; ships the riscv64 OpenSBI blob |
 | [pve-manager](https://github.com/daemonhorn/pve-manager) | Web UI: architecture selector and riscv64 defaults |
 | [pve-edk2-firmware](https://github.com/daemonhorn/pve-edk2-firmware) | TPM2 enabled for the RiscVVirt platform |
+| [pve-docs](https://github.com/daemonhorn/pve-docs) | Guest-architecture documentation in `qm.adoc` |
 
-All four carry a single commit on branch `feature/riscv64-guest-support`. The same diffs
-are also bundled as `git format-patch` output under [`patches/`](patches/), one directory
-per repo, for review or `git am` without cloning the individual forks.
+Each repo has two relevant branches:
+
+- **`feature/riscv64-guest-support`** — the original as-built, as-tested state (one commit
+  per repo except `pve-docs`, which didn't exist there yet). Kept as the reference snapshot
+  everything in [RISCV64_RESULTS.md](RISCV64_RESULTS.md) was actually verified against.
+- **`submit/riscv64-v1`** — submission-shaped: `debian/changelog`/fake-identity hunks
+  stripped, `Signed-off-by` added, `qemu-server` and `pve-qemu` split into reviewable
+  per-concern commits, run through `proxmox-perltidy`/`perlcritic -5`. This is what
+  [UPSTREAM_SUBMISSION_PLAN.md](UPSTREAM_SUBMISSION_PLAN.md) actually produced — see there for
+  the full gap analysis and what's still manual (CLA, bugzilla, sending mail).
+
+The `submit/riscv64-v1` diffs are also bundled as `git format-patch` output under
+[`patches/`](patches/), one directory per repo, for review or `git am` without cloning the
+individual forks. [`submission-drafts/`](submission-drafts/) has ready-to-send text for the
+pve-devel RFC email, two bugzilla reports, and both series' cover letters.
 
 ## Downloads
 
@@ -64,7 +77,10 @@ guest-agent against a *running* riscv64 guest OS — these need a guest OS insta
 just firmware.
 
 Upstream contribution note: Proxmox accepts patches via its mailing list
-(`git send-email`), not pull requests. These commits would want splitting into smaller
-reviewable pieces before submission — see
-[UPSTREAM_SUBMISSION_PLAN.md](UPSTREAM_SUBMISSION_PLAN.md) for the full gap list (missing
-sign-offs, CLA, bugzilla tracking, commit splitting, lint gates) and a sequenced checklist.
+(`git send-email`), not pull requests. The `submit/riscv64-v1` branches and
+[`patches/`](patches/) above are the result of working through
+[UPSTREAM_SUBMISSION_PLAN.md](UPSTREAM_SUBMISSION_PLAN.md)'s gap list — what's left is manual
+and requires the account holder: signing and sending the Harmony CLA, filing the bugzilla
+reports, and actually sending the mail (drafts ready in
+[`submission-drafts/`](submission-drafts/)). One open decision flagged in the plan: whether to
+keep, adjust, or drop the `Co-authored-by`/AI-attribution trailer on each commit before sending.

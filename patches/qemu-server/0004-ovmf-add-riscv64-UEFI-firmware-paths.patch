@@ -1,0 +1,39 @@
+From 4baa0b713bbe52d3861b2113dc0fe272f4388ef9 Mon Sep 17 00:00:00 2001
+From: daemonhorn <dhorn2000@gmail.com>
+Date: Sun, 16 Aug 2026 10:54:18 -0400
+Subject: [PATCH qemu-server 4/6] ovmf: add riscv64 UEFI firmware paths
+
+Adds RISCV_VIRT_CODE.fd/RISCV_VIRT_VARS.fd as the default (and only)
+firmware pair for riscv64, matching how aarch64's UEFI firmware is
+wired up. There is no secure-boot variant upstream yet for this
+platform. Firmware boots via OpenSBI -> EDK2 UEFI, the same chain
+aarch64 uses via its own first-stage loader.
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+Signed-off-by: daemonhorn <dhorn2000@gmail.com>
+---
+ src/PVE/QemuServer/OVMF.pm | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/PVE/QemuServer/OVMF.pm b/src/PVE/QemuServer/OVMF.pm
+index 67665c7c..8f00eca5 100644
+--- a/src/PVE/QemuServer/OVMF.pm
++++ b/src/PVE/QemuServer/OVMF.pm
+@@ -56,6 +56,14 @@ my $OVMF = {
+             "$EDK2_FW_BASE/AAVMF_CODE.fd", "$EDK2_FW_BASE/AAVMF_VARS.fd",
+         ],
+     },
++    # No secure-boot ('ms') variant yet - upstream EDK2 has no RISC-V secure-boot platform file
++    # at this time, unlike x86_64/aarch64. riscv64 boots through QEMU's built-in OpenSBI (M-mode,
++    # implicit default, no separate firmware file) before reaching this EDK2 UEFI (S-mode) payload.
++    riscv64 => {
++        default => [
++            "$EDK2_FW_BASE/RISCV_VIRT_CODE.fd", "$EDK2_FW_BASE/RISCV_VIRT_VARS.fd",
++        ],
++    },
+ };
+ 
+ my $temporary_efidisk_dir = '/run/qemu-server/efidisk';
+-- 
+2.47.3
+

@@ -1,0 +1,83 @@
+From dfcf2945d661556ba936a72b12318b6bbdfc4576 Mon Sep 17 00:00:00 2001
+From: daemonhorn <dhorn2000@gmail.com>
+Date: Sun, 16 Aug 2026 10:58:41 -0400
+Subject: [PATCH docs] qm: document riscv64 guest support
+
+Adds riscv64 guest coverage alongside the existing arm64/aarch64
+notes in the architecture overview, firmware (OVMF-only, no SeaBIOS),
+machine type (virt), and CPU model (no 'host' under TCG, 'max' used
+by default) sections.
+
+Scoped to guest support only: riscv64 is not a supported {pve} host
+architecture, so pve-system-requirements.adoc and pve-faq.adoc (which
+describe supported host hardware) are intentionally left unchanged.
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+Signed-off-by: daemonhorn <dhorn2000@gmail.com>
+---
+ qm.adoc | 21 ++++++++++++++++-----
+ 1 file changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/qm.adoc b/qm.adoc
+index 5b46cdc..37f4cdf 100644
+--- a/qm.adoc
++++ b/qm.adoc
+@@ -47,6 +47,11 @@ emulates 64-bit ARM (aarch64) machines instead. Emulating the same architecture
+ fastest options, due to the availability of processor extensions which greatly
+ speed up QEMU when the emulated architecture matches the host architecture.
+ 
++{pve} also supports 64-bit RISC-V (riscv64) guests (`arch: riscv64`) on x86_64
++hosts, using QEMU's software emulation (TCG) rather than hardware-accelerated
++KVM, since there is no RISC-V processor to accelerate against on x86_64
++hardware. Expect emulation-typical performance rather than near-native speed.
++
+ NOTE: You may sometimes encounter the term _KVM_ (Kernel-based Virtual Machine).
+ It means that QEMU is running with the support of the virtualization processor
+ extensions, via the Linux KVM module. In the context of {pve} _QEMU_ and
+@@ -139,8 +144,8 @@ snapshots) more intelligently.
+ {pve} allows to boot VMs with different firmware and machine types, namely
+ xref:qm_bios_and_uefi[SeaBIOS and OVMF]. In most cases you want to switch from
+ the default SeaBIOS to OVMF only if you plan to use
+-xref:qm_pci_passthrough[PCIe passthrough]. On arm64 hosts OVMF is the default
+-and only option, as SeaBIOS is x86-only.
++xref:qm_pci_passthrough[PCIe passthrough]. On arm64 hosts, and for riscv64
++guests, OVMF is the default and only option, as SeaBIOS is x86-only.
+ 
+ [[qm_machine_type]]
+ 
+@@ -157,7 +162,8 @@ Additionally, you can select a xref:qm_pci_viommu[vIOMMU] implementation.
+ 
+ NOTE: The Intel 440FX and Q35 chipsets are specific to x86 guests. On arm64
+ hosts, virtual machines use the `virt` machine type, which models a generic,
+-UEFI-based ARM machine.
++UEFI-based ARM machine. riscv64 guests use their own, otherwise equivalent
++`virt` machine type.
+ 
+ Machine Version
+ +++++++++++++++
+@@ -476,7 +482,10 @@ Opteron for AMD.
+ NOTE: The 'kvm64' and 'x86-64-v*' CPU models described here are x86-only. On
+ arm64 hosts, guests use ARM CPU models: 'host' to expose the physical CPU
+ (recommended on the supported hardware), or a generic model such as 'max',
+-together with the `virt` machine type.
++together with the `virt` machine type. riscv64 guests use RISC-V CPU models
++the same way, except 'host' is not meaningful under TCG (there is no RISC-V
++host CPU to expose), so 'max' -- which exposes every extension the emulator
++supports -- is used by default instead.
+ 
+ In short:
+ 
+@@ -1140,7 +1149,9 @@ standard setups.
+ 
+ NOTE: SeaBIOS, and thus `bios=seabios`, is available for x86 guests only. On
+ arm64 hosts, virtual machines always boot through UEFI, using the ARM build of
+-OVMF (AAVMF), so `bios=ovmf` is the only supported setting there.
++OVMF (AAVMF), so `bios=ovmf` is the only supported setting there. riscv64
++guests likewise always boot through UEFI, via OpenSBI and a RISC-V build of
++OVMF, so `bios=ovmf` is the only supported setting for them too.
+ 
+ Some operating systems (such as Windows 11) may require use of an UEFI
+ compatible implementation. In such cases, you must use *OVMF* instead,
+-- 
+2.47.3
+

@@ -1,0 +1,79 @@
+From a39fc86937f141d5a4ce2dbcc999527ec979ff12 Mon Sep 17 00:00:00 2001
+From: daemonhorn <dhorn2000@gmail.com>
+Date: Sun, 16 Aug 2026 10:53:31 -0400
+Subject: [PATCH qemu-server 1/6] helpers, machine: recognize riscv64 as a
+ guest architecture
+
+Adds the riscv64 QEMU binary path to Helpers.pm and 'virt' as its
+default machine type in Machine.pm, mirroring aarch64.
+
+Introduces uses_virt_machine($arch) in Helpers.pm: it returns true for
+every architecture except x86_64, i.e. every architecture that uses
+QEMU's 'virt' machine rather than 'pc'/'q35'. Several existing
+$arch eq 'aarch64' checks were really asking this question; later
+commits in this series replace them so riscv64 gets the same handling
+aarch64 already does (no legacy VGA, PCIe bus naming, USB via
+usb-ehci, UART-only serial, no vmgenid).
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+Signed-off-by: daemonhorn <dhorn2000@gmail.com>
+---
+ src/PVE/QemuServer/Helpers.pm | 11 +++++++++++
+ src/PVE/QemuServer/Machine.pm |  3 ++-
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/src/PVE/QemuServer/Helpers.pm b/src/PVE/QemuServer/Helpers.pm
+index dd17eef5..bcaffab5 100644
+--- a/src/PVE/QemuServer/Helpers.pm
++++ b/src/PVE/QemuServer/Helpers.pm
+@@ -21,15 +21,26 @@ our @EXPORT_OK = qw(
+     parse_number_sets
+     windows_version
+     get_host_arch
++    uses_virt_machine
+ );
+ 
+ my $nodename = PVE::INotify::nodename();
+ 
+ my $arch_to_qemu_binary = {
+     aarch64 => '/usr/bin/qemu-system-aarch64',
++    riscv64 => '/usr/bin/qemu-system-riscv64',
+     x86_64 => '/usr/bin/qemu-system-x86_64',
+ };
+ 
++# True for any guest architecture that boots via QEMU's generic 'virt' machine
++# (aarch64, riscv64, ...) rather than the x86_64-specific 'pc'/'q35' machines.
++# Centralizes what used to be many individual `$arch eq 'aarch64'` checks so a
++# future virt-machine architecture only needs to be added here.
++sub uses_virt_machine {
++    my ($arch) = @_;
++    return $arch ne 'x86_64';
++}
++
+ # wrapper around the Tools helper, having it here makes it easier to mock for testing
+ sub get_host_arch {
+     return PVE::Tools::get_host_arch();
+diff --git a/src/PVE/QemuServer/Machine.pm b/src/PVE/QemuServer/Machine.pm
+index 35161d1f..f4af6b95 100644
+--- a/src/PVE/QemuServer/Machine.pm
++++ b/src/PVE/QemuServer/Machine.pm
+@@ -124,6 +124,7 @@ sub print_machine {
+ my $default_machines = {
+     x86_64 => 'pc',
+     aarch64 => 'virt',
++    riscv64 => 'virt',
+ };
+ 
+ sub default_machine_for_arch {
+@@ -480,7 +481,7 @@ sub get_power_state_flags {
+     my $machine = $machine_conf->{type} || default_machine_for_arch($arch);
+ 
+     if ($machine =~ /^virt/) {
+-        return; # virt machines are normally ARM64 ones which have no concept of s3/s4
++        return; # virt machines (aarch64, riscv64) have no concept of s3/s4
+     }
+ 
+     my $object = ($machine =~ m/q35/) ? "ICH9-LPC" : "PIIX4_PM";
+-- 
+2.47.3
+

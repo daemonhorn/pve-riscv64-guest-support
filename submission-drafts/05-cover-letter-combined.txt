@@ -1,0 +1,50 @@
+Subject: [pve-devel] [PATCH edk2-firmware/qemu-server/manager/docs 0/8] add riscv64 guest support
+
+Send this after 04's "PATCH qemu" series has landed or been acked, and
+after the standalone qemu-server TPM fix (00-cover-letter-tpm-fix-standalone.txt)
+has gone out. Precedent for this combined-repo grouping: TDX and AMD
+SEV-SNP support both went out this way (edk2-firmware/qemu-server/manager
+series on pve-devel).
+
+--- cover letter body ---
+
+Adds riscv64 as a supported VM guest architecture: QEMU/TCG software
+emulation on x86_64 hosts (no KVM - no riscv64 hardware to accelerate
+against). Builds on the qemu-system-riscv64 target added in the
+"PATCH qemu" series [link to that thread once sent] and the sysbus-TPM
+fix sent standalone [link once sent].
+
+Verified end-to-end on real hardware: a riscv64 guest boots OpenSBI and
+EDK2 UEFI firmware to the boot manager, via both a full ISO install and
+an in-place package upgrade. FreeBSD 15.1-RELEASE riscv64 boots to a
+shell over the same chain (disk install not completed - blocked on
+console/TUI limitations unrelated to this series, not a riscv64 defect).
+
+Two known gaps, tracked as separate bugs rather than folded into this
+series:
+- ide-cd emits bus=ide.N on virt-machine architectures (no IDE bus
+  there); pre-existing, affects aarch64 too. bug #<TBD>
+- riscv64 EDK2 firmware publishes ACPI but not FDT, so FDT-only guest
+  OSes need `-machine acpi=off` as a workaround. bug #<TBD>
+
+Full writeup, every bug found while building/testing this, and the raw
+patches: https://github.com/daemonhorn/pve-riscv64-guest-support
+
+Patches:
+  1/8 [edk2-firmware] riscv64: enable TPM2 support in the RiscVVirt firmware build
+  2/8 [qemu-server]   helpers, machine: recognize riscv64 as a guest architecture
+  3/8 [qemu-server]   pci, usb, api: replace ad-hoc aarch64 checks with uses_virt_machine()
+  4/8 [qemu-server]   ovmf: add riscv64 UEFI firmware paths
+  5/8 [qemu-server]   cpuconfig: add riscv64 CPU models, default type, and bitness
+  6/8 [qemu-server]   test: add riscv64 cfg2cmd fixtures
+  7/8 [manager]       riscv64: expose riscv64 guest architecture in the web UI
+  8/8 [docs]          qm: document riscv64 guest support
+
+NOTE: git send-email doesn't natively send a single series spanning
+multiple repos/working trees in one command - format each repo's patches
+separately (subject prefixes are already configured per-repo, see
+sendemail.to/format.subjectprefix in each repo's local git config) and
+send them as one logical thread by hand: send the cover letter first,
+then use --in-reply-to on each repo's `git send-email` invocation with
+the cover letter's Message-ID so they thread together in mail clients
+and on lore.proxmox.com.

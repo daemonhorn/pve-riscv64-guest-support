@@ -1,30 +1,30 @@
-From 44a1c2abbf485d5e6d80559c5f9756fcefe19220 Mon Sep 17 00:00:00 2001
+From f1ef1b29f90fd651b057a6370b163cd8bef1f898 Mon Sep 17 00:00:00 2001
 From: daemonhorn <dhorn2000@gmail.com>
-Date: Sat, 15 Aug 2026 20:56:41 -0400
-Subject: [PATCH] riscv64: enable TPM2 support in the RiscVVirt firmware build
+Date: Sun, 16 Aug 2026 10:57:10 -0400
+Subject: [PATCH edk2-firmware] riscv64: enable TPM2 support in the RiscVVirt
+ firmware build
 
-Adds TPM2_ENABLE and TPM2_CONFIG_ENABLE to RISCV64_FLAGS. Both PCDs are
-defined and gated for this platform in OvmfPkg/RiscVVirt/RiscVVirtQemu.dsc,
-so the riscv64 virt firmware can support a vTPM the same way the aarch64
-and OVMF builds do.
-
-The riscv64 target, its install file and package stanza already existed;
+Adds TPM2_ENABLE and TPM2_CONFIG_ENABLE to RISCV64_FLAGS. Both PCDs
+are defined and gated for this platform in
+OvmfPkg/RiscVVirt/RiscVVirtQemu.dsc, so the riscv64 virt firmware can
+support a vTPM the same way the aarch64 and OVMF builds do. The
+riscv64 target, its install file and package stanza already existed;
 only the TPM flags were missing.
 
-Also ignores the staged build directory, which is ~6GB and was not
-covered by the existing .deb/.buildinfo/.changes patterns.
+Also ignores the staged pve-edk2-firmware-*.*/ build directory
+(~6GB), which was not covered by the existing .deb/.buildinfo/.changes
+patterns.
 
 Verified: the built RISCV_VIRT_CODE.fd and RISCV_VIRT_VARS.fd are
 33554432 bytes each with valid _FVH firmware volume headers, and the
 firmware initializes to the EDK2 boot manager in a riscv64 guest.
 
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_015sQUuNrGk7QcVLxJHWmcme
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+Signed-off-by: daemonhorn <dhorn2000@gmail.com>
 ---
- .gitignore       | 1 +
- debian/changelog | 9 +++++++++
- debian/rules     | 4 +++-
- 3 files changed, 13 insertions(+), 1 deletion(-)
+ .gitignore   | 1 +
+ debian/rules | 4 +++-
+ 2 files changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/.gitignore b/.gitignore
 index a4c231b..c7fb4c1 100644
@@ -35,23 +35,6 @@ index a4c231b..c7fb4c1 100644
  *.changes
  edk2.build
 +/pve-edk2-firmware-*.*/
-diff --git a/debian/changelog b/debian/changelog
-index d760677..41a60dc 100644
---- a/debian/changelog
-+++ b/debian/changelog
-@@ -1,3 +1,12 @@
-+pve-edk2-firmware (4.2025.05-3+riscv1) trixie; urgency=medium
-+
-+  * Enable TPM2 support for the RISC-V virt platform firmware build.
-+
-+  * Locally versioned (+riscv1) so these packages are distinguishable from,
-+    and sort newer than, the stock Proxmox packages of the same version.
-+
-+ -- Proxmox riscv64 support <support@proxmox.com>  Sat, 15 Aug 2026 18:31:53 -0400
-+
- pve-edk2-firmware (4.2025.05-3) trixie; urgency=medium
- 
-   * build secureboot-enabled image for aarch64.
 diff --git a/debian/rules b/debian/rules
 index 8abc6a7..edbfa07 100755
 --- a/debian/rules

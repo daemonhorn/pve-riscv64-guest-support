@@ -1,0 +1,200 @@
+From 077119fd0f358a38fbdea2b40cfa512da8bd40a5 Mon Sep 17 00:00:00 2001
+From: daemonhorn <dhorn2000@gmail.com>
+Date: Sun, 16 Aug 2026 10:54:10 -0400
+Subject: [PATCH qemu-server 3/6] pci, usb, api: replace ad-hoc aarch64 checks
+ with uses_virt_machine()
+
+Replaces the remaining $arch eq 'aarch64' (and $arch ne 'aarch64')
+checks with uses_virt_machine($arch), so riscv64 gets the same
+handling aarch64 already does:
+
+- PCI.pm: reject the IDE bus and use the pcie.0 bus name.
+- USB.pm: use usb-ehci instead of piix3-usb-uhci, and skip the legacy
+  pve-usb.cfg readconfig.
+- QemuServer.pm: tablet/keyboard USB device selection, the non-VGA
+  virtio-gpu variant map, default VGA type, UART-only serial0, and the
+  four tablet/keyboard hotplug call sites in vmconfig_hotplug_pending.
+- API2/Qemu.pm: skip auto-generating vmgenid, matching aarch64 (QEMU's
+  virt machine has no SMBIOS table for it to live in).
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+Signed-off-by: daemonhorn <dhorn2000@gmail.com>
+---
+ src/PVE/API2/Qemu.pm      |  2 +-
+ src/PVE/QemuServer.pm     | 29 +++++++++++++++--------------
+ src/PVE/QemuServer/PCI.pm | 11 +++++++----
+ src/PVE/QemuServer/USB.pm | 11 ++++++++---
+ 4 files changed, 31 insertions(+), 22 deletions(-)
+
+diff --git a/src/PVE/API2/Qemu.pm b/src/PVE/API2/Qemu.pm
+index 3320313c..ce9f8fdd 100644
+--- a/src/PVE/API2/Qemu.pm
++++ b/src/PVE/API2/Qemu.pm
+@@ -1514,7 +1514,7 @@ __PACKAGE__->register_method({
+ 
+                     if (
+                         (!defined($conf->{vmgenid}) || $conf->{vmgenid} eq '1')
+-                        && $arch ne 'aarch64'
++                        && !PVE::QemuServer::Helpers::uses_virt_machine($arch)
+                     ) {
+                         $conf->{vmgenid} = PVE::QemuServer::generate_uuid();
+                     }
+diff --git a/src/PVE/QemuServer.pm b/src/PVE/QemuServer.pm
+index e2d4c34e..e27fb13c 100644
+--- a/src/PVE/QemuServer.pm
++++ b/src/PVE/QemuServer.pm
+@@ -1186,7 +1186,7 @@ sub print_tabletdevice_full {
+ 
+     # we use uhci for old VMs because tablet driver was buggy in older qemu
+     my $usbbus;
+-    if ($q35 || $arch eq 'aarch64') {
++    if ($q35 || uses_virt_machine($arch)) {
+         $usbbus = 'ehci';
+     } else {
+         $usbbus = 'uhci';
+@@ -1198,7 +1198,7 @@ sub print_tabletdevice_full {
+ sub print_keyboarddevice_full {
+     my ($conf, $arch) = @_;
+ 
+-    return if $arch ne 'aarch64';
++    return if !uses_virt_machine($arch);
+ 
+     return "usb-kbd,id=keyboard,bus=ehci.0,port=2";
+ }
+@@ -1483,8 +1483,9 @@ my $vga_map = {
+     'virtio-gl' => 'virtio-vga-gl',
+ };
+ 
+-# QEMU builds only the non-VGA variants of the virtio GPU for aarch64
+-my $vga_map_aarch64 = {
++# QEMU builds only the non-VGA variants of the virtio GPU for virt-machine archs (aarch64,
++# riscv64) - there is no legacy VGA/framebuffer on the 'virt' machine to attach a *-vga device to.
++my $vga_map_no_legacy_vga = {
+     $vga_map->%*,
+     'virtio' => 'virtio-gpu',
+     'virtio-gl' => 'virtio-gpu-gl',
+@@ -1493,7 +1494,7 @@ my $vga_map_aarch64 = {
+ my sub map_vga_model {
+     my ($vga_type, $arch) = @_;
+ 
+-    return $arch eq 'aarch64' ? $vga_map_aarch64->{$vga_type} : $vga_map->{$vga_type};
++    return uses_virt_machine($arch) ? $vga_map_no_legacy_vga->{$vga_type} : $vga_map->{$vga_type};
+ }
+ 
+ sub print_vga_device {
+@@ -3099,7 +3100,7 @@ my sub get_vga_properties {
+     $vga->{type} = 'qxl' if $qxlnum;
+ 
+     if (!$vga->{type}) {
+-        if ($arch eq 'aarch64') {
++        if (uses_virt_machine($arch)) {
+             $vga->{type} = 'virtio';
+         } elsif (min_version($machine_version, 2, 9)) {
+             $vga->{type} = (!$winversion || $winversion >= 6) ? 'std' : 'cirrus';
+@@ -3342,10 +3343,10 @@ sub config_to_command {
+         if ($path eq 'socket') {
+             my $socket = "/var/run/qemu-server/${vmid}.serial$i";
+             push @$devices, '-chardev', "socket,id=serial$i,path=$socket,server=on,wait=off";
+-            # On aarch64, serial0 is the UART device. QEMU only allows
+-            # connecting UART devices via the '-serial' command line, as
+-            # the device has a fixed slot on the hardware...
+-            if ($arch eq 'aarch64' && $i == 0) {
++            # On virt-machine archs (aarch64, riscv64), serial0 is the UART device. QEMU only
++            # allows connecting UART devices via the '-serial' command line, as the device has a
++            # fixed slot on the hardware...
++            if (uses_virt_machine($arch) && $i == 0) {
+                 push @$devices, '-serial', "chardev:serial$i";
+             } else {
+                 push @$devices, '-device', "isa-serial,chardev=serial$i";
+@@ -4750,10 +4751,10 @@ sub vmconfig_hotplug_pending {
+                 if ($defaults->{tablet}) {
+                     vm_deviceplug($storecfg, $conf, $vmid, 'tablet', $arch, $machine_type);
+                     vm_deviceplug($storecfg, $conf, $vmid, 'keyboard', $arch, $machine_type)
+-                        if $arch eq 'aarch64';
++                        if uses_virt_machine($arch);
+                 } else {
+                     vm_deviceunplug($vmid, $conf, 'tablet');
+-                    vm_deviceunplug($vmid, $conf, 'keyboard') if $arch eq 'aarch64';
++                    vm_deviceunplug($vmid, $conf, 'keyboard') if uses_virt_machine($arch);
+                 }
+             } elsif ($opt =~ m/^usb(\d+)$/) {
+                 my $index = $1;
+@@ -4821,10 +4822,10 @@ sub vmconfig_hotplug_pending {
+                 if ($value == 1) {
+                     vm_deviceplug($storecfg, $conf, $vmid, 'tablet', $arch, $machine_type);
+                     vm_deviceplug($storecfg, $conf, $vmid, 'keyboard', $arch, $machine_type)
+-                        if $arch eq 'aarch64';
++                        if uses_virt_machine($arch);
+                 } elsif ($value == 0) {
+                     vm_deviceunplug($vmid, $conf, 'tablet');
+-                    vm_deviceunplug($vmid, $conf, 'keyboard') if $arch eq 'aarch64';
++                    vm_deviceunplug($vmid, $conf, 'keyboard') if uses_virt_machine($arch);
+                 }
+             } elsif ($opt =~ m/^usb(\d+)$/) {
+                 my $index = $1;
+diff --git a/src/PVE/QemuServer/PCI.pm b/src/PVE/QemuServer/PCI.pm
+index 0b67943c..51cb87d3 100644
+--- a/src/PVE/QemuServer/PCI.pm
++++ b/src/PVE/QemuServer/PCI.pm
+@@ -295,15 +295,18 @@ my $get_addr_mapping_from_id = sub {
+ sub print_pci_addr {
+     my ($id, $bridges, $arch) = @_;
+ 
+-    die "aarch64 cannot use IDE devices\n" if $arch eq 'aarch64' && $id =~ /^ide/;
++    die "$arch cannot use IDE devices\n"
++        if PVE::QemuServer::Helpers::uses_virt_machine($arch) && $id =~ /^ide/;
+ 
+     my $res = '';
+ 
+     my $map = get_pci_addr_map();
+     if (my $d = $get_addr_mapping_from_id->($map, $id)) {
+-        # Using same bus slots on all HW, so we need to check special cases here. For aarch64, the
+-        # virt machine has an initial pcie.0. The other pci bridges that get added are called pci.N.
+-        my $busname = $arch eq 'aarch64' && $d->{bus} eq 0 ? 'pcie' : 'pci';
++        # Using same bus slots on all HW, so we need to check special cases here. For virt-machine
++        # archs (aarch64, riscv64), the virt machine has an initial pcie.0. The other pci bridges
++        # that get added are called pci.N.
++        my $busname =
++            PVE::QemuServer::Helpers::uses_virt_machine($arch) && $d->{bus} eq 0 ? 'pcie' : 'pci';
+ 
+         $res = ",bus=$busname.$d->{bus},addr=$d->{addr}";
+         $bridges->{ $d->{bus} } = 1 if $bridges;
+diff --git a/src/PVE/QemuServer/USB.pm b/src/PVE/QemuServer/USB.pm
+index c9408a42..93b6ce8d 100644
+--- a/src/PVE/QemuServer/USB.pm
++++ b/src/PVE/QemuServer/USB.pm
+@@ -4,7 +4,7 @@ use strict;
+ use warnings;
+ use PVE::QemuServer::PCI qw(print_pci_addr);
+ use PVE::QemuServer::Machine;
+-use PVE::QemuServer::Helpers qw(min_version windows_version);
++use PVE::QemuServer::Helpers qw(min_version windows_version uses_virt_machine);
+ use PVE::JSONSchema;
+ use PVE::Mapping::USB;
+ use base 'Exporter';
+@@ -133,7 +133,7 @@ sub get_usb_controllers {
+         && ($ostype eq 'l26' || windows_version($ostype) > 7);
+     my $is_q35 = PVE::QemuServer::Machine::machine_type_is_q35($conf);
+ 
+-    if ($arch eq 'aarch64') {
++    if (uses_virt_machine($arch)) {
+         $pciaddr = print_pci_addr('ehci', $bridges, $arch);
+         push @$devices, '-device', "usb-ehci,id=ehci$pciaddr";
+     } elsif (!$is_q35) {
+@@ -152,7 +152,12 @@ sub get_usb_controllers {
+         $use_usb2 = 1 if !$d->{usb3};
+     }
+ 
+-    if (!$use_qemu_xhci && !$is_q35 && $use_usb2 && $arch ne 'aarch64') {
++    if (
++        !$use_qemu_xhci
++        && !$is_q35
++        && $use_usb2
++        && !uses_virt_machine($arch)
++    ) {
+         # include usb device config if still on x86 before-xhci machines and if USB 3 is not used
+         push @$devices, '-readconfig', '/usr/share/qemu-server/pve-usb.cfg';
+     }
+-- 
+2.47.3
+

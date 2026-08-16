@@ -1,0 +1,60 @@
+From 84d1f28646aa95317f29ca1887639930dcdb83de Mon Sep 17 00:00:00 2001
+From: daemonhorn <dhorn2000@gmail.com>
+Date: Sun, 16 Aug 2026 10:56:01 -0400
+Subject: [PATCH qemu 1/4] fix: purge only the riscv32 OpenSBI blob, not
+ riscv64's
+
+PC_BIOS_FW_PURGE_LIST_IN's opensbi-riscv.*-generic-fw_dynamic.bin
+entry matches both the riscv32 and riscv64 OpenSBI blobs via its
+glob. That was harmless while only x86_64/aarch64 targets were built,
+but becomes a real bug once riscv64-softmmu is in --target-list:
+QEMU's riscv64 'virt' machine uses
+opensbi-riscv64-generic-fw_dynamic.bin as its default BIOS, so purging
+it makes every riscv64 guest fail to start with:
+
+  qemu-system-riscv64: Unable to find the RISC-V BIOS
+  "opensbi-riscv64-generic-fw_dynamic.bin"
+
+Confirmed empirically: `qm start` on an arch=riscv64 guest failed
+exactly this way on a real PVE install built from this tree, with
+/usr/share/kvm/ containing zero opensbi files. Names the riscv32 blob
+explicitly instead; no riscv32-softmmu target is built.
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+Signed-off-by: daemonhorn <dhorn2000@gmail.com>
+---
+ Makefile | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 2ead600..0b3f2d0 100644
+--- a/Makefile
++++ b/Makefile
+@@ -22,6 +22,15 @@ ifeq ($(shell test -f "$(SRCDIR)/configure" && echo 1 || echo 0), 0)
+ 	cd $(SRCDIR); meson subprojects download
+ endif
+ 
++# NOTE: the riscv64 OpenSBI blob must NOT be purged. QEMU's riscv64 'virt' machine uses
++# opensbi-riscv64-generic-fw_dynamic.bin as its *default* BIOS, so removing it makes every riscv64
++# guest fail to start with:
++#   qemu-system-riscv64: Unable to find the RISC-V BIOS "opensbi-riscv64-generic-fw_dynamic.bin"
++# Confirmed empirically: `qm start` on an arch=riscv64 guest failed exactly this way on a real PVE
++# install built from this tree, with /usr/share/kvm/ containing zero opensbi files.
++# This entry previously read 'opensbi-riscv.*-generic-fw_dynamic.bin', whose '.*' matched both
++# widths - harmless while only x86_64/aarch64 targets were built, but wrong once riscv64-softmmu is
++# in --target-list. riscv32 stays purged, as no riscv32-softmmu target is built.
+ PC_BIOS_FW_PURGE_LIST_IN = \
+ 	hppa-firmware.img \
+ 	hppa-firmware64.img \
+@@ -34,7 +43,7 @@ PC_BIOS_FW_PURGE_LIST_IN = \
+ 	u-boot.e500 \
+ 	qemu_vga.ndrv \
+ 	slof.bin \
+-	opensbi-riscv.*-generic-fw_dynamic.bin \
++	opensbi-riscv32-generic-fw_dynamic.bin \
+ 
+ BLOB_PURGE_SED_CMDS = $(foreach FILE,$(PC_BIOS_FW_PURGE_LIST_IN),-e "/$(FILE)/d")
+ BLOB_PURGE_FILTER = $(foreach FILE,$(PC_BIOS_FW_PURGE_LIST_IN),-e "$(FILE)")
+-- 
+2.47.3
+

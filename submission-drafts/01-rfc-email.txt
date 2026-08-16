@@ -1,0 +1,51 @@
+To: pve-devel@lists.proxmox.com
+Subject: [pve-devel] riscv64 as a VM guest architecture - scope check before sending patches
+
+Hi all,
+
+I've implemented riscv64 as a supported VM guest architecture and would like
+a scope check before sending the actual patch series, per the "coordinate
+before starting" guidance in the developer docs.
+
+Scope: riscv64 guests under QEMU/TCG software emulation on x86_64 hosts. No
+KVM acceleration is involved or claimed - there's no riscv64 hardware to
+accelerate against on x86_64, so this is emulation-typical performance, not
+near-native. riscv64 is not proposed as a supported PVE *host* architecture,
+only as a guest architecture selectable via arch=riscv64, the same way
+aarch64 is handled today. It reuses QEMU's 'virt' machine type, the same
+shape aarch64 already uses.
+
+What's implemented and verified end-to-end on real hardware (a riscv64
+guest boots OpenSBI and EDK2 UEFI firmware to the boot manager, both via a
+full ISO install and via an in-place package upgrade):
+
+- pve-qemu: builds riscv64-softmmu, ships its OpenSBI firmware and
+  CPU/machine metadata
+- qemu-server: arch plumbing, CPU models, OVMF firmware paths, and a sysbus
+  TPM device-model fix that also affects aarch64 today (tpm-tis vs
+  tpm-tis-device - happy to send that one alone, immediately, regardless of
+  how the rest of this is received)
+- pve-manager: architecture selector and defaults in the web UI
+- pve-edk2-firmware: TPM2 support for the riscv64 virt firmware build
+- pve-docs: guest-architecture documentation alongside the existing
+  aarch64 notes
+
+Full writeup, including every bug found while building and testing this
+(three of which broke the pve-qemu build outright, one of which meant no
+riscv64 guest could ever boot), is here:
+https://github.com/daemonhorn/pve-riscv64-guest-support
+
+Two known gaps I'm tracking separately rather than folding into this
+series: ide-cd emits bus=ide.N on virt-machine architectures, which have no
+IDE bus (pre-existing, affects aarch64 too); and the riscv64 EDK2 firmware
+publishes ACPI but not FDT, so FDT-only guest OSes (some FreeBSD/Linux
+configs) need -machine acpi=off as a workaround pending a firmware rebuild
+with PcdForceNoAcpi=TRUE.
+
+Before I format and send the actual series: is TCG-only riscv64 guest
+support something pve-devel wants to see land, and is the
+pve-qemu-first / edk2-firmware+qemu-server+manager+docs-combined send order
+reasonable, or would you prefer it structured differently?
+
+Thanks,
+[your name]

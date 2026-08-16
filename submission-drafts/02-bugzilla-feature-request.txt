@@ -1,0 +1,35 @@
+Product/Component: (pick the closest existing product/component for qemu-server or pve-qemu on bugzilla.proxmox.com)
+Severity: enhancement
+Summary: Support riscv64 as a VM guest architecture
+
+Description:
+
+Request/proposal to add riscv64 as a supported VM guest architecture,
+running under QEMU/TCG software emulation on x86_64 hosts (no KVM - there
+is no riscv64 hardware to accelerate against on x86_64). Reuses QEMU's
+'virt' machine type, the same shape aarch64 guests already use.
+
+Implementation spans pve-qemu (build the riscv64-softmmu QEMU target),
+qemu-server (arch plumbing, CPU models, firmware paths), pve-manager (web
+UI), pve-edk2-firmware (TPM2 support for the riscv64 firmware build), and
+pve-docs.
+
+Verified end-to-end on real hardware: a riscv64 guest boots OpenSBI and
+EDK2 UEFI firmware to the boot manager, via both a full ISO install and an
+in-place package upgrade. FreeBSD 15.1-RELEASE riscv64 boots to a shell
+over the same chain.
+
+Full writeup and the patches: https://github.com/daemonhorn/pve-riscv64-guest-support
+(git format-patch output under patches/; submission-ready branches
+'submit/riscv64-v1' on each component repo fork)
+
+Sending an RFC to pve-devel for a scope check before mailing the formal
+patch series; linking this bug there so discussion has a fixed reference
+point, and so the lead patch in the series can reference it as
+"close #<this-bug-number>: riscv64 guest support" once accepted.
+
+--
+NOTE for whoever files this: bugzilla.proxmox.com requires an account and
+picking the actual product/component taxonomy, which needs a live look at
+the tracker to get right - fill those in before submitting, this draft
+only covers the description text.

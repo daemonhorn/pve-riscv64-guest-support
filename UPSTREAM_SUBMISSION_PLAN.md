@@ -25,6 +25,9 @@ found below invalidates the implementation — every item is process/hygiene, no
 
 ## 2. Commit hygiene — every commit needs rework before sending
 
+**Done — see §7 for the resulting branches.** Left as-written below since it explains the
+reasoning; the "needs rework" framing now describes what *was* done, not what's outstanding.
+
 Inspected all four `feature/riscv64-guest-support` commits against the style guide. Two
 findings apply to all four; the rest are per-repo.
 
@@ -128,16 +131,27 @@ the JS style guide for pve-manager. **Neither is installed in this environment a
 is in the currently configured apt sources** (checked; `apt-cache search` returns nothing).
 Before formatting patches:
 
-- Source `proxmox-perltidy` and its `.perltidyrc` (it's a thin wrapper — check
-  `pve-common`/`pve-doc-generator` or ask on-list for the current package name) and run it
-  over every changed `.pm`/`.pl` file. None of this session's Perl was ever run through it.
-- Install `perlcritic` (`libperl-critic-perl` from Debian) and run at `--severity 5`
-  against the same files.
-- Run `eslint` against `www/manager6/{qemu/Architecture.js,qemu/OSDefaults.js,
-  form/CPUModelSelector.js,Utils.js}` — these were only checked by manual brace-balance
-  counting this session, never by a real linter or in a browser.
-- `perl -wc` each changed `.pm` as a cheap first pass (already done during implementation,
-  but re-run after any commit-splitting edits change file contents).
+- [x] **Done.** Cloned `proxmox-perltidy` (`git.proxmox.com/git/proxmox-perltidy.git`) for
+  its real `perltidyrc`, and `pve-eslint` (own vendored eslint 8.41.0 fork) for JS — Debian's
+  packaged `perltidy` (20250105) is too old for the config (`Unknown option:
+  cuddled-paren-brace-weld`); installed `Perl::Tidy` 20260808 from CPAN instead, which works.
+  Compared `perltidy`'s output on the master-vs-feature-branch diff of every changed `.pm`/`.pl`
+  file (tidying both sides and diffing the tidied versions cancels out pre-existing style debt
+  in these large legacy files, isolating exactly what this patch would need to reformat). Result:
+  every file was already compliant except one multi-line `if (...)` in `USB.pm`, where the style
+  guide's "once wrapping is required, the condition goes on its own line" rule wasn't followed —
+  fixed. Also fixed a one-character pre-existing style wart (`scalar (@$machines)` →
+  `scalar(@$machines)`) in a `pve-qemu` line already being rewritten.
+- [x] **Done.** `perlcritic --severity 5` against every changed Perl file: zero violations in
+  code actually added by this patch. It did flag several severity-5 issues elsewhere in the same
+  large files (a nested named sub, a leading-zero integer literal, two `return undef;`s, three
+  subroutine prototypes) — all pre-existing, all outside the diff, left untouched as out-of-scope
+  drive-by fixes.
+- [~] **Attempted, blocked.** `pve-eslint` needs a webpack build step to produce a runnable
+  `bin/` entry point (`Cannot find module './eslint-helpers'` when run directly from the source
+  checkout) — not worth chasing further for four small JS files. JS changes are still only
+  verified by manual review, not a real linter run.
+- [x] `perl -wc`/`perl -c` re-run clean on every file after the commit-splitting work below.
 
 ## 4. Known-open bugs — decide disposition before sending
 
@@ -145,69 +159,86 @@ Two bugs from `RISCV64_RESULTS.md` §6 are still unfixed. Each needs an explicit
 not silence, since a careful reviewer will find them by testing:
 
 - **Bug 8 — `ide-cd` emits `bus=ide.N` on virt machines** (affects aarch64 too, pre-existing).
-  Options: (a) fix it and fold into the qemu-server series as another standalone commit,
-  (b) file it as its own bugzilla bug and mention it in the riscv64 series' cover letter as
-  a known, separately-tracked limitation so reviewers don't think it was missed. Given it's
-  pre-existing and aarch64-shared, (b) keeps the riscv64 series scoped and lets the fix be
-  reviewed on its own merits.
-- **Bug 9 — EDK2 publishes ACPI but not FDT**, breaking FreeBSD riscv64. Needs
-  `PcdForceNoAcpi=TRUE` in the firmware build — untried. Same choice as above; given it only
-  affects non-Linux guests and has a documented workaround (`args: -machine acpi=off`),
-  filing it separately rather than blocking the series on a firmware rebuild seems right,
-  but flag it explicitly in the cover letter either way.
+  **Decided: option (b)**, file separately. Draft text in
+  `submission-drafts/03-bugzilla-known-gaps.txt`.
+- **Bug 9 — EDK2 publishes ACPI but not FDT**, breaking FreeBSD riscv64. **Decided: option (b)**,
+  file separately. Same draft file.
 
 ## 5. Documentation (`pve-docs`)
 
-Not yet touched — no `pve-docs` clone exists in this workspace (the `riscv64-docs/`
-directory here is a stray second clone of our own `pve-riscv64-guest-support` GitHub repo,
-not Proxmox's actual docs repo). `arch: <string>` and the CPU-model/machine documentation in
-`pve-docs` likely need a riscv64 mention alongside the existing aarch64 one. Clone
-`git://git.proxmox.com/git/pve-docs.git`, find where aarch64 is documented, and add the
-equivalent riscv64 coverage (AsciiDoc, ~80-100 col lines per the style guide) as a fifth,
-low-risk patch — good candidate to fold into the combined series in §2.3 step 3.
+**Done.** Cloned `git://git.proxmox.com/git/pve-docs.git`, found every `aarch64` mention in
+`qm.adoc` (architecture overview, firmware/OVMF, machine type, CPU models — four spots) and
+added the riscv64 equivalent alongside each, all under ~80 columns. Deliberately did **not**
+touch `pve-system-requirements.adoc` or `pve-faq.adoc`: those describe supported **host**
+architectures, and riscv64 is guest-only here — adding it there would overclaim. Pushed as
+`daemonhorn/pve-docs`, branch `submit/riscv64-v1`.
 
 ## 6. Sending mechanics
 
-Per-repo, before formatting:
+**Done** (config) / **drafted** (content) — not sent, sending itself is intentionally left to
+you.
 
-```bash
-git config --local sendemail.to pve-devel@lists.proxmox.com
-git config --local format.subjectprefix 'PATCH <repo-prefix>'  # qemu-server / qemu / manager / edk2-firmware
-git config --local format.signoff true
-```
+`sendemail.to`, `format.subjectprefix` (`qemu-server` / `qemu` / `manager` / `edk2-firmware` /
+`docs` — confirmed each against real precedent on lore.proxmox.com, note `qemu` and `manager`
+are bare, not `pve-`-prefixed), and `format.signoff` are set as local git config in all five
+repos already. SMTP (`[sendemail]` server/port/user) still needs configuring once you have an
+address to send from — that's yours to fill in, not something crackable from this environment.
 
-Format and send (example for the qemu-server sub-series once split per §2.2):
+`submission-drafts/` in this repo has the RFC email, both bugzilla reports, and both series'
+cover letters, ready to copy/edit/send:
 
-```bash
-git format-patch -s -o outgoing/ --cover-letter master..feature/riscv64-guest-support
-# edit outgoing/0000-cover-letter.patch: summary, scope, bugzilla link, test coverage,
-# explicit note on the two open bugs from §4 and their tracking status
-git send-email --to=pve-devel@lists.proxmox.com outgoing/*.patch
-```
+- `00-send-order-and-tpm-fix-note.txt` — the sequencing, plus exact `git format-patch` commands
+  and commit ranges for the trickiest part (sending the standalone TPM fix separately from the
+  combined series, which shares its qemu-server repo but not that one commit).
+- `01-rfc-email.txt`, `02-bugzilla-feature-request.txt`, `03-bugzilla-known-gaps.txt`
+- `04-cover-letter-pve-qemu.txt`, `05-cover-letter-combined.txt`
 
-SMTP needs configuring once (`~/.gitconfig`, `[sendemail]` block — server/port/user for
-whichever address the CLA was signed under). Use `-v2`, `-v3`, ... on any resend after
-review feedback, and always resend the *complete* series at the new version, with a
-"changes since v1" summary in the cover letter.
+## 7. Submission-ready branches
 
-## 7. Sequenced checklist
+**Done.** Each repo has a new `submit/riscv64-v1` branch (pushed to its existing GitHub fork,
+`pve-docs` fork created fresh) built from `master`, not from `feature/riscv64-guest-support` —
+that original branch is left untouched as the as-built/as-tested reference. Diffed every file
+in the new branches against the original to confirm zero content drift beyond the two lint fixes
+above.
 
-1. [ ] File the bugzilla enhancement request; get the `#NNNN`.
-2. [ ] Send the RFC/heads-up email to pve-devel (scope + bugzilla link) — wait for signal
-   before proceeding, per Proxmox's own "coordinate first" guidance.
-3. [ ] Send the Harmony CLA to `office@proxmox.com` (parallel with step 2 — has its own lead
-   time).
-4. [ ] Decide the AI-attribution trailer question (§2.1) and apply uniformly.
-5. [ ] Strip the `debian/changelog` hunks and fake maintainer identity from all four commits.
-6. [ ] Split `qemu-server` and `pve-qemu` into the reviewable commit sequences in §2.2;
-   re-add `Signed-off-by` throughout.
-7. [ ] Source and run `proxmox-perltidy` + `perlcritic -5` (Perl) and `eslint` (JS); fix
-   anything they flag.
-8. [ ] Decide and document disposition of bugs 8 and 9 (§4).
-9. [ ] Add the `pve-docs` patch (§5).
-10. [ ] Send `qemu-server`'s standalone TPM fix first.
+| Repo | Commits | Notes |
+|---|---|---|
+| `qemu-server` | 6 (split from 1) | TPM fix isolated as commit 2/6 — designed to be cherry-picked and sent standalone first |
+| `pve-qemu` | 4 (split from 1) | OpenSBI purge fix isolated as commit 1/4 |
+| `pve-manager` | 1 (unchanged count) | changelog hunk stripped, sign-off added |
+| `pve-edk2-firmware` | 1 (unchanged count) | changelog hunk stripped, sign-off added |
+| `pve-docs` | 1 (new) | riscv64 guest documentation |
+
+All debian/changelog hunks and the fake `support@proxmox.com` maintainer identity are gone from
+every commit. **AI-attribution trailer decision (§2.1): applied a default** — kept
+`Co-authored-by: Claude Opus 5 <noreply@anthropic.com>` (it's on Proxmox's recognized trailer
+list), dropped `Claude-Session:` (nonstandard, leaks an internal URL with no meaning to an
+outside reviewer). This was flagged as your call, not mine — override before sending if you'd
+rather keep, change, or drop the trailer entirely; it's a one-line `git commit --amend` per repo
+since nothing has been mailed yet.
+
+Full test suite re-run on the split `qemu-server` branch (102 default-arch + 3 aarch64 fixtures)
+to confirm the split introduced no regressions: all pass.
+
+## 8. Sequenced checklist
+
+1. [ ] File the bugzilla enhancement request (draft ready); get the `#NNNN`.
+2. [ ] Send the RFC/heads-up email to pve-devel (draft ready) — wait for signal before sending
+   patches, per Proxmox's own "coordinate first" guidance.
+3. [ ] Send the Harmony CLA to `office@proxmox.com`.
+4. [x] Decide the AI-attribution trailer question — applied a default (§2.1/§7), override if
+   you'd rather not.
+5. [x] Strip the `debian/changelog` hunks and fake maintainer identity from all commits.
+6. [x] Split `qemu-server` and `pve-qemu` into reviewable commit sequences; `Signed-off-by`
+   added throughout.
+7. [x] Ran `proxmox-perltidy` + `perlcritic -5`; fixed the one real finding. `eslint` attempted,
+   blocked on `pve-eslint`'s own build step — JS still only manually reviewed.
+8. [x] Decided disposition of bugs 8 and 9 — file separately (draft reports ready).
+9. [x] Added the `pve-docs` patch.
+10. [ ] Send `qemu-server`'s standalone TPM fix first (commands in
+    `submission-drafts/00-send-order-and-tpm-fix-note.txt`).
 11. [ ] Send the `pve-qemu` (`qemu`-prefixed) series once the TPM fix has landed or at least
     been acked.
-12. [ ] Send the combined `edk2-firmware/qemu-server/manager` (+docs) series, cover letter
-    referencing the merged/pending `qemu` series.
+12. [ ] Send the combined `edk2-firmware/qemu-server/manager/docs` series, referencing the
+    merged/pending `qemu` series.
 13. [ ] Track review threads on lore.proxmox.com; respond with `-v2`+ as needed.

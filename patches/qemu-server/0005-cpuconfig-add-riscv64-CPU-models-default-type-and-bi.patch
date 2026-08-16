@@ -1,0 +1,232 @@
+From cf14c16bb9b6a8ed108f8dbdf8594d09638c0102 Mon Sep 17 00:00:00 2001
+From: daemonhorn <dhorn2000@gmail.com>
+Date: Sun, 16 Aug 2026 10:54:33 -0400
+Subject: [PATCH qemu-server 5/6] cpuconfig: add riscv64 CPU models, default
+ type, and bitness
+
+Adds riscv64 to the arch enum and CPU-model machinery:
+
+- get_default_cpu_type('riscv64', $kvm) returns 'host' under KVM and
+  'max' under TCG, matching aarch64's pattern.
+- get_cpu_bitness() always reports 64 for riscv64 (there is no 32-bit
+  guest variant in this series).
+- The per-arch CPU-model table is loaded from
+  cpu-models-riscv64.json when pve-qemu-kvm ships it, guarded by an
+  -f check with a hardcoded fallback list so hosts running an older
+  pve-qemu-kvm that predates this file keep working instead of dying
+  on every VM start, for every architecture, not just riscv64. The
+  fallback's model names were confirmed against a real
+  `qemu-system-riscv64 -cpu help`; the vendor strings attached to them
+  (SiFive/THEAD/Ventana Micro Systems/Shakti/Tenstorrent/XiangShan)
+  are this author's best-effort attribution, since riscv64's -cpu help
+  output has no vendor column to parse, unlike x86_64/aarch64.
+
+Also updates CPUFlags.pm, API2/Qemu/CPUFlags.pm and Drive.pm's
+description/POD text and empty-flag-list guards to mention riscv64
+alongside aarch64, since neither architecture has VM-specific CPU
+flags PVE currently understands.
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+Signed-off-by: daemonhorn <dhorn2000@gmail.com>
+---
+ src/PVE/API2/Qemu/CPUFlags.pm   |  2 +-
+ src/PVE/QemuServer/CPUConfig.pm | 58 ++++++++++++++++++++++++++++++++-
+ src/PVE/QemuServer/CPUFlags.pm  | 19 ++++++-----
+ src/PVE/QemuServer/Drive.pm     |  3 +-
+ 4 files changed, 70 insertions(+), 12 deletions(-)
+
+diff --git a/src/PVE/API2/Qemu/CPUFlags.pm b/src/PVE/API2/Qemu/CPUFlags.pm
+index c1683833..026d72ac 100644
+--- a/src/PVE/API2/Qemu/CPUFlags.pm
++++ b/src/PVE/API2/Qemu/CPUFlags.pm
+@@ -17,7 +17,7 @@ __PACKAGE__->register_method({
+     method => 'GET',
+     description =>
+         "List of available VM-specific CPU flags. Returns an empty list for 'aarch64' "
+-        . "as no VM-specific flags are defined for it yet.",
++        . "and 'riscv64' as no VM-specific flags are defined for them yet.",
+     permissions => { user => 'all' },
+     parameters => {
+         additionalProperties => 0,
+diff --git a/src/PVE/QemuServer/CPUConfig.pm b/src/PVE/QemuServer/CPUConfig.pm
+index 2bae55b2..3a776dee 100644
+--- a/src/PVE/QemuServer/CPUConfig.pm
++++ b/src/PVE/QemuServer/CPUConfig.pm
+@@ -29,7 +29,7 @@ our @EXPORT_OK = qw(
+ my $arch_desc = {
+     description => "Virtual processor architecture. Defaults to the host architecture.",
+     type => 'string',
+-    enum => [qw(x86_64 aarch64)],
++    enum => [qw(x86_64 aarch64 riscv64)],
+ };
+ PVE::JSONSchema::register_standard_option("pve-qm-cpu-arch", $arch_desc);
+ 
+@@ -84,6 +84,7 @@ my $builtin_models_by_arch = {
+         },
+     },
+     aarch64 => {},
++    riscv64 => {},
+ };
+ 
+ my $all_builtin_models;
+@@ -110,6 +111,42 @@ my $cputypes_32bit = {
+     'qemu32' => 1,
+ };
+ 
++# Fallback list used both for QEMU packages that predate the static cpu-models-$arch.json files
++# (below) *and* as a stand-in for hosts whose installed pve-qemu-kvm package is new enough to ship
++# cpu-models-x86_64.json/-aarch64.json but predates riscv64-softmmu support and thus has no
++# cpu-models-riscv64.json yet - unlike x86_64/aarch64, this file's presence cannot be assumed just
++# because the *package* is "new enough", since riscv64 support was added later than the static
++# per-arch file mechanism itself.
++# NOTE: the model *names* were sourced by actually running `qemu-system-riscv64 -cpu help`
++# (QEMU 10.0.11, Debian trixie's qemu-system-riscv package - not pve-qemu-kvm's own 11.0.3
++# build, which was not available to check against when this was written) through
++# debian/parse-cpu-models.pl from the pve-qemu repo, then dropping 32-bit-only/experimental
++# cores to match get_cpu_bitness()'s riscv64 == 64-bit assumption. The *vendor strings* are
++# this author's best-effort attribution from public knowledge of each core (QEMU's riscv64
++# `-cpu help` has no vendor column, unlike x86_64/aarch64) - double check them. Reconcile the
++# whole list against the actual pve-qemu-kvm 11.0.3+ build once riscv64-softmmu is enabled
++# there - QEMU 11.0 may add/rename cores relative to 10.0.11.
++my $riscv64_fallback_cpu_models = {
++    'sifive-u54' => 'SiFive',
++    'thead-c906' => 'THEAD',
++    'tt-ascalon' => 'Tenstorrent',
++    'veyron-v1' => 'Ventana Micro Systems',
++    'shakti-c' => 'Shakti',
++    'xiangshan-nanhu' => 'XiangShan',
++    'xiangshan-kunminghu' => 'XiangShan',
++    'mips-p8700' => 'MIPS',
++    # generic ISA-profile CPUs, not tied to a specific vendor's silicon; max exposes every
++    # extension QEMU/TCG supports
++    rv64 => 'default',
++    rv64e => 'default',
++    rv64i => 'default',
++    rva22s64 => 'default',
++    rva22u64 => 'default',
++    rva23s64 => 'default',
++    rva23u64 => 'default',
++    max => 'default',
++};
++
+ my $cpu_models_by_arch;
+ my $all_cpu_models;
+ 
+@@ -118,6 +155,7 @@ my $all_cpu_models;
+ sub initialize_cpu_models {
+     my $cpu_models_x86_64_file = '/usr/share/kvm/cpu-models-x86_64.json';
+     my $cpu_models_aarch64_file = '/usr/share/kvm/cpu-models-aarch64.json';
++    my $cpu_models_riscv64_file = '/usr/share/kvm/cpu-models-riscv64.json';
+ 
+     if (-f $cpu_models_x86_64_file) { # QEMU package is new enough to ship static model files
+         my $json_text = PVE::File::file_get_contents($cpu_models_x86_64_file);
+@@ -129,6 +167,17 @@ sub initialize_cpu_models {
+         ($json_text) = $json_text =~ /(.*)/s; # untaint multi-line string
+         $cpu_models_by_arch->{'aarch64'} = eval { decode_json($json_text) }
+             or die "unable to decode contents of '$cpu_models_aarch64_file' - $@\n";
++
++        if (-f $cpu_models_riscv64_file) {
++            $json_text = PVE::File::file_get_contents($cpu_models_riscv64_file);
++            ($json_text) = $json_text =~ /(.*)/s; # untaint multi-line string
++            $cpu_models_by_arch->{'riscv64'} = eval { decode_json($json_text) }
++                or die "unable to decode contents of '$cpu_models_riscv64_file' - $@\n";
++        } else {
++            # installed pve-qemu-kvm predates riscv64-softmmu support - degrade instead of dying,
++            # so this doesn't break x86_64/aarch64 VMs on hosts that haven't upgraded yet.
++            $cpu_models_by_arch->{'riscv64'} = $riscv64_fallback_cpu_models;
++        }
+     } else { # FIXME: MAJOR VERSION: remove hard-coded list
+         $cpu_models_by_arch = {
+             x86_64 => {
+@@ -242,6 +291,7 @@ sub initialize_cpu_models {
+                 # 32 bit and deprecated models were not added
+                 max => 'default',
+             },
++            riscv64 => $riscv64_fallback_cpu_models,
+         };
+     }
+ 
+@@ -1156,6 +1206,11 @@ sub get_default_cpu_type($arch, $kvm) {
+         # KVM on aarch64 only accepts 'host'/'max' (plus the legacy cortex-a53/-a57 targets); use
+         # 'host' to pass the real host CPU through. Without KVM, the emulated 'max' works instead.
+         $cputype = $kvm ? 'host' : 'max';
++    } elsif ($arch eq 'riscv64') {
++        # Same reasoning as aarch64 above. Only the non-KVM 'max' path is reachable today, since
++        # KVM requires a riscv64 host with the H extension, which PVE does not yet support
++        # starting VMs on; 'host' is kept for forward-compatibility with that future case.
++        $cputype = $kvm ? 'host' : 'max';
+     }
+ 
+     return $cputype;
+@@ -1188,6 +1243,7 @@ sub get_cpu_bitness($cpu_prop_str, $arch = undef) {
+ 
+     return $cputypes_32bit->{$cputype} ? 32 : 64 if $arch eq 'x86_64';
+     return 64 if $arch eq 'aarch64';
++    return 64 if $arch eq 'riscv64';
+ 
+     die "unsupported architecture '$arch'\n";
+ }
+diff --git a/src/PVE/QemuServer/CPUFlags.pm b/src/PVE/QemuServer/CPUFlags.pm
+index 0d3206b2..dd6e3f02 100644
+--- a/src/PVE/QemuServer/CPUFlags.pm
++++ b/src/PVE/QemuServer/CPUFlags.pm
+@@ -82,6 +82,7 @@ my $supported_vm_specific_cpu_flags_by_arch = {
+         },
+     ],
+     aarch64 => [],
++    riscv64 => [],
+ };
+ 
+ my $all_supported_vm_specific_cpu_flags = {};
+@@ -213,14 +214,14 @@ Selects which acceleration type flag/node compatibility should be evaluated for.
+ 
+ When set to 1, return only VM-specific flags, otherwise return all flags.
+ 
+-=item C<$arch> (C<x86_64> | C<aarch64>)
++=item C<$arch> (C<x86_64> | C<aarch64> | C<riscv64>)
+ 
+ Specifies which architecture to query flags for. Note that in both scopes (VM-specific
+-and all), C<aarch64> returns empty lists: this is intended for VM-specific flags, as no
+-C<aarch64> flags are currently settable for a specific VM, however it is a known
+-limitation for the "all" scope. PVE does not currently ship a list of understood flags
+-for C<aarch64>, as it is not as trivial to obtain as for C<x86_64>, whose flags are easy
+-to parse from QEMU's C<-cpu help> output.
++and all), C<aarch64> and C<riscv64> return empty lists: this is intended for VM-specific
++flags, as no C<aarch64>/C<riscv64> flags are currently settable for a specific VM, however
++it is a known limitation for the "all" scope. PVE does not currently ship a list of
++understood flags for C<aarch64>/C<riscv64>, as it is not as trivial to obtain as for
++C<x86_64>, whose flags are easy to parse from QEMU's C<-cpu help> output.
+ 
+ =back
+ 
+@@ -250,10 +251,10 @@ C<supported-on> list populated from nodes that report supporting C<svm> or C<vmx
+ =cut
+ 
+ sub query_available_cpu_flags($accel, $vm_specific, $arch) {
+-    # TODO: a way to get supported flags for aarch64. This is not done because PVE
+-    # does not currently ship a list of understood flags for aarch64, as it's more difficult
++    # TODO: a way to get supported flags for aarch64/riscv64. This is not done because PVE
++    # does not currently ship a list of understood flags for them, as it's more difficult
+     # to obtain during QEMU build - for x86_64, qemu -cpu help will just list the flags.
+-    return [] if $arch eq 'aarch64';
++    return [] if $arch eq 'aarch64' || $arch eq 'riscv64';
+ 
+     my $descriptions = flag_descriptions($arch);
+     my $base =
+diff --git a/src/PVE/QemuServer/Drive.pm b/src/PVE/QemuServer/Drive.pm
+index b80b7dbb..f4f9b2de 100644
+--- a/src/PVE/QemuServer/Drive.pm
++++ b/src/PVE/QemuServer/Drive.pm
+@@ -510,7 +510,8 @@ my %efitype_fmt = (
+         enum => [qw(2m 4m)],
+         description => "Size and type of the OVMF EFI vars. '4m' is newer and recommended,"
+             . " and required for Secure Boot. For backwards compatibility, '2m' is used"
+-            . " if not otherwise specified. Ignored for VMs with arch=aarch64 (ARM).",
++            . " if not otherwise specified. Ignored for VMs with arch=aarch64 (ARM) or"
++            . " arch=riscv64.",
+         optional => 1,
+         default => '2m',
+     },
+-- 
+2.47.3
+

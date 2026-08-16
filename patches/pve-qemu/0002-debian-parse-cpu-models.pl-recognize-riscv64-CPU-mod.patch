@@ -1,0 +1,103 @@
+From 6f07997781687ea720b828b6f3ec53208d1a0267 Mon Sep 17 00:00:00 2001
+From: daemonhorn <dhorn2000@gmail.com>
+Date: Sun, 16 Aug 2026 10:56:10 -0400
+Subject: [PATCH qemu 2/4] debian/parse-cpu-models.pl: recognize riscv64 CPU
+ models
+
+Extends the -cpu help parser with riscv64 handling: vendor detection
+for the SiFive/THEAD/Ventana Micro Systems/Shakti/Tenstorrent/
+XiangShan cores and the generic rv64* ISA-profile CPUs (attributed
+'default', like x86_64/aarch64's own generic/base models), plus
+mips-p8700 (MIPS' P8700 core has an optional RISC-V-compatible
+execution mode and appears in the riscv64 target's CPU list despite
+the vendor name). 32-bit-only and experimental cores are skip-listed,
+mirroring how 32-bit ARM cores are already skipped for aarch64.
+
+Without this, the script dies on the first riscv64 CPU model line
+once riscv64-softmmu is added to --target-list, breaking the whole
+package build - confirmed by actually running it against a real
+`qemu-system-riscv64 -cpu help` (pve-qemu-kvm 11.0.3).
+
+The vendor strings are this author's best-effort attribution: unlike
+x86_64/aarch64, riscv64's -cpu help output has no vendor column to
+parse from.
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+Signed-off-by: daemonhorn <dhorn2000@gmail.com>
+---
+ debian/parse-cpu-models.pl | 52 ++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 52 insertions(+)
+
+diff --git a/debian/parse-cpu-models.pl b/debian/parse-cpu-models.pl
+index c5e7bfa..05cd423 100755
+--- a/debian/parse-cpu-models.pl
++++ b/debian/parse-cpu-models.pl
+@@ -42,6 +42,20 @@ my @skip_models = (
+     'sa1110',
+     'ti925t',
+     # some more are skipped based on being deprecated
++
++    # riscv64: 32-bit-only or experimental cores have no place in the 64-bit guest CPU model list
++    # (get_cpu_bitness() in qemu-server always reports 64 for arch=riscv64), mirroring how 32-bit
++    # ARM cores are skipped above for aarch64.
++    'lowrisc-ibex', # 32-bit (Ibex)
++    'max32',
++    'rv32',
++    'rv32e',
++    'rv32i',
++    'sifive-e31', # 32-bit (SiFive E-series, embedded)
++    'sifive-e34',
++    'sifive-e51',
++    'sifive-u34', # 32-bit variant of the U-series (unlike the 64-bit sifive-u54)
++    'x-rv128', # experimental 128-bit
+ );
+ my $skip_models_re = qr/(@{[join('|', @skip_models)]})/;
+ 
+@@ -76,6 +90,44 @@ while (my $line = <STDIN>) {
+         } elsif ($model =~ m/^(a64fx|cortex-|neoverse-).*$/) {
+             $cpu_models->{$model} = 'ARM';
+             next;
++        } elsif ($model =~ m/^(rv64|rv64e|rv64i|rva22s64|rva22u64|rva23s64|rva23u64)$/) {
++            # generic RISC-V ISA-profile CPUs, not tied to a specific vendor's silicon.
++            #
++            # NOTE on the whole riscv64 branch below: the *model names* were confirmed by
++            # actually running `qemu-system-riscv64 -cpu help` (QEMU 10.0.11) through this
++            # script end-to-end. The *vendor strings* assigned to each (SiFive/THEAD/Ventana
++            # Micro Systems/Shakti/Tenstorrent/XiangShan) are this author's best-effort
++            # attribution from public knowledge of each core, since QEMU's riscv64 `-cpu help`
++            # output has no vendor column to parse (unlike the AMD/Intel/ARM branches above,
++            # which read the vendor directly from QEMU's own output) - double check them, they
++            # are guesses, not parsed data.
++            $cpu_models->{$model} = 'default';
++            next;
++        } elsif ($model =~ m/^sifive-/) {
++            $cpu_models->{$model} = 'SiFive';
++            next;
++        } elsif ($model =~ m/^thead-/) {
++            $cpu_models->{$model} = 'THEAD';
++            next;
++        } elsif ($model eq 'veyron-v1') {
++            $cpu_models->{$model} = 'Ventana Micro Systems';
++            next;
++        } elsif ($model eq 'shakti-c') {
++            $cpu_models->{$model} = 'Shakti';
++            next;
++        } elsif ($model eq 'tt-ascalon') {
++            $cpu_models->{$model} = 'Tenstorrent';
++            next;
++        } elsif ($model =~ m/^xiangshan-/) {
++            $cpu_models->{$model} = 'XiangShan';
++            next;
++        } elsif ($model eq 'mips-p8700') {
++            # confirmed present in a real `qemu-system-riscv64 -cpu help` (pve-qemu-kvm 11.0.3)
++            # build, though absent from the QEMU 10.0.11 build used to write the branch above -
++            # MIPS' P8700 core has an optional RISC-V-compatible execution mode, hence the entry
++            # under the riscv64 target's CPU list despite the vendor name.
++            $cpu_models->{$model} = 'MIPS';
++            next;
+         }
+         die "unable to deal with line '$line' - implement me"
+     } elsif ($info =~ m/^\(deprecated\)$/) {
+-- 
+2.47.3
+

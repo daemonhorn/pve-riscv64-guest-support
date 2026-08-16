@@ -1,0 +1,288 @@
+From 84f5bfdfd3eedcf67b3fd45f53fb80b0ccf6633f Mon Sep 17 00:00:00 2001
+From: daemonhorn <dhorn2000@gmail.com>
+Date: Sun, 16 Aug 2026 10:54:39 -0400
+Subject: [PATCH qemu-server 6/6] test: add riscv64 cfg2cmd fixtures
+
+Adds three cfg2cmd fixtures, matching aarch64's existing coverage:
+default host with a riscv64 guest, a native riscv64 host, and a
+riscv64 host running an x86_64 guest. The default-host fixture
+additionally exercises the TPM and UART serial paths added earlier in
+this series.
+
+Verified against a real installed Perl stack and real QEMU binaries:
+the full existing suite (102 default-arch + 3 aarch64 fixtures) has
+zero regressions, and all three new fixtures pass.
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+Signed-off-by: daemonhorn <dhorn2000@gmail.com>
+---
+ src/test/Makefile                             |  5 +-
+ .../cfg2cmd/riscv64/simple-riscv-host.conf    | 17 +++++++
+ .../riscv64/simple-riscv-host.conf.cmd        | 41 +++++++++++++++++
+ src/test/cfg2cmd/riscv64/simple-riscv.conf    | 34 ++++++++++++++
+ .../cfg2cmd/riscv64/simple-riscv.conf.cmd     | 46 +++++++++++++++++++
+ .../riscv64/simple-x86-on-riscv-host.conf     | 18 ++++++++
+ .../riscv64/simple-x86-on-riscv-host.conf.cmd | 38 +++++++++++++++
+ 7 files changed, 198 insertions(+), 1 deletion(-)
+ create mode 100644 src/test/cfg2cmd/riscv64/simple-riscv-host.conf
+ create mode 100644 src/test/cfg2cmd/riscv64/simple-riscv-host.conf.cmd
+ create mode 100644 src/test/cfg2cmd/riscv64/simple-riscv.conf
+ create mode 100644 src/test/cfg2cmd/riscv64/simple-riscv.conf.cmd
+ create mode 100644 src/test/cfg2cmd/riscv64/simple-x86-on-riscv-host.conf
+ create mode 100644 src/test/cfg2cmd/riscv64/simple-x86-on-riscv-host.conf.cmd
+
+diff --git a/src/test/Makefile b/src/test/Makefile
+index cf589f41..e7e93fc2 100644
+--- a/src/test/Makefile
++++ b/src/test/Makefile
+@@ -1,6 +1,6 @@
+ all: test
+ 
+-test: test_snapshot test_cfg_to_cmd test_cfg_to_cmd_aarch64 test_pci_addr_conflicts test_pci_reservation test_qemu_img_convert test_migration test_restore_config test_parse_config
++test: test_snapshot test_cfg_to_cmd test_cfg_to_cmd_aarch64 test_cfg_to_cmd_riscv64 test_pci_addr_conflicts test_pci_reservation test_qemu_img_convert test_migration test_restore_config test_parse_config
+ 
+ test_snapshot: run_snapshot_tests.pl
+ 	./run_snapshot_tests.pl
+@@ -12,6 +12,9 @@ test_cfg_to_cmd: run_config2command_tests.pl cfg2cmd/*.conf
+ test_cfg_to_cmd_aarch64: run_config2command_tests.pl cfg2cmd/aarch64/*.conf
+ 	perl -I../ ./run_config2command_tests.pl cfg2cmd/aarch64
+ 
++test_cfg_to_cmd_riscv64: run_config2command_tests.pl cfg2cmd/riscv64/*.conf
++	perl -I../ ./run_config2command_tests.pl cfg2cmd/riscv64
++
+ test_qemu_img_convert: run_qemu_img_convert_tests.pl
+ 	perl -I../ ./run_qemu_img_convert_tests.pl
+ 
+diff --git a/src/test/cfg2cmd/riscv64/simple-riscv-host.conf b/src/test/cfg2cmd/riscv64/simple-riscv-host.conf
+new file mode 100644
+index 00000000..3edd4a36
+--- /dev/null
++++ b/src/test/cfg2cmd/riscv64/simple-riscv-host.conf
+@@ -0,0 +1,17 @@
++# TEST: Simple test for a basic configuration with riscv64 set as the host architecture
++# HOST_ARCH: riscv64
++bootdisk: scsi0
++bios: ovmf
++cores: 3
++ide2: none,media=cdrom
++memory: 768
++name: simple
++net0: virtio=A2:C0:43:77:08:A0,bridge=vmbr0
++numa: 0
++ostype: l26
++scsi0: local:8006/vm-8006-disk-0.qcow2,discard=on,size=104858K
++scsihw: virtio-scsi-pci
++smbios1: uuid=7b10d7af-b932-4c66-b2c3-3996152ec465
++sockets: 1
++vmgenid: c773c261-d800-4348-9f5d-167fadd53cf8
++efidisk0: local:8006/vm-8006-disk-1.qcow2,efitype=4m
+diff --git a/src/test/cfg2cmd/riscv64/simple-riscv-host.conf.cmd b/src/test/cfg2cmd/riscv64/simple-riscv-host.conf.cmd
+new file mode 100644
+index 00000000..d404d194
+--- /dev/null
++++ b/src/test/cfg2cmd/riscv64/simple-riscv-host.conf.cmd
+@@ -0,0 +1,41 @@
++/usr/bin/kvm \
++  -id 8006 \
++  -name simple \
++  -no-shutdown \
++  -chardev 'socket,id=qmp,path=/var/run/qemu-server/8006.qmp,server=on,wait=off' \
++  -mon 'chardev=qmp,mode=control' \
++  -chardev 'socket,id=qmp-event,path=/var/run/qmeventd.sock,reconnect-ms=5000' \
++  -mon 'chardev=qmp-event,mode=control' \
++  -pidfile /var/run/qemu-server/8006.pid \
++  -daemonize \
++  -smbios 'type=1,uuid=7b10d7af-b932-4c66-b2c3-3996152ec465' \
++  -object '{"id":"throttle-drive-efidisk0","limits":{},"qom-type":"throttle-group"}' \
++  -blockdev '{"driver":"raw","file":{"driver":"file","filename":"/usr/share/pve-edk2-firmware//RISCV_VIRT_CODE.fd"},"node-name":"pflash0","read-only":true}' \
++  -blockdev '{"detect-zeroes":"on","discard":"ignore","driver":"throttle","file":{"cache":{"direct":false,"no-flush":false},"detect-zeroes":"on","discard":"ignore","driver":"qcow2","file":{"aio":"io_uring","cache":{"direct":false,"no-flush":false},"detect-zeroes":"on","discard":"ignore","driver":"file","filename":"/var/lib/vz/images/8006/vm-8006-disk-1.qcow2","node-name":"e4abf08bba72d3a54b87a58d2f50906","read-only":false},"node-name":"f4abf08bba72d3a54b87a58d2f50906","read-only":false},"node-name":"drive-efidisk0","read-only":false,"throttle-group":"throttle-drive-efidisk0"}' \
++  -smp '3,sockets=1,cores=3,maxcpus=3' \
++  -nodefaults \
++  -boot 'menu=on,strict=on,reboot-timeout=1000,splash=/usr/share/qemu-server/bootsplash.jpg' \
++  -vnc 'unix:/var/run/qemu-server/8006.vnc,password=on' \
++  -cpu host \
++  -m 768 \
++  -object '{"id":"throttle-drive-scsi0","limits":{},"qom-type":"throttle-group"}' \
++  -device 'pci-bridge,id=pci.1,chassis_nr=1,bus=pcie.0,addr=0x1e' \
++  -device 'pci-bridge,id=pci.2,chassis_nr=2,bus=pcie.0,addr=0x1f' \
++  -device 'vmgenid,guid=c773c261-d800-4348-9f5d-167fadd53cf8' \
++  -device 'usb-ehci,id=ehci,bus=pcie.0,addr=0x1' \
++  -device 'usb-tablet,id=tablet,bus=ehci.0,port=1' \
++  -device 'usb-kbd,id=keyboard,bus=ehci.0,port=2' \
++  -device 'virtio-gpu,id=vga,bus=pcie.0,addr=0x2' \
++  -device 'virtio-serial,id=spice,bus=pcie.0,addr=0x9' \
++  -chardev 'spicevmc,id=vdagent,name=vdagent' \
++  -device 'virtserialport,chardev=vdagent,name=com.redhat.spice.0' \
++  -spice 'tls-port=61000,addr=127.0.0.1,tls-ciphers=HIGH,seamless-migration=on' \
++  -device 'virtio-balloon-pci,id=balloon0,bus=pcie.0,addr=0x3,free-page-reporting=on' \
++  -iscsi 'initiator-name=iqn.1993-08.org.debian:01:aabbccddeeff' \
++  -device 'ide-cd,bus=ide.1,unit=0,id=ide2,bootindex=200' \
++  -device 'virtio-scsi-pci,id=scsihw0,bus=pcie.0,addr=0x5' \
++  -blockdev '{"detect-zeroes":"unmap","discard":"unmap","driver":"throttle","file":{"cache":{"direct":true,"no-flush":false},"detect-zeroes":"unmap","discard":"unmap","driver":"qcow2","file":{"aio":"io_uring","cache":{"direct":true,"no-flush":false},"detect-zeroes":"unmap","discard":"unmap","driver":"file","filename":"/var/lib/vz/images/8006/vm-8006-disk-0.qcow2","node-name":"ecd04be4259153b8293415fefa2a84c","read-only":false},"node-name":"fcd04be4259153b8293415fefa2a84c","read-only":false},"node-name":"drive-scsi0","read-only":false,"throttle-group":"throttle-drive-scsi0"}' \
++  -device 'scsi-hd,bus=scsihw0.0,channel=0,scsi-id=0,lun=0,drive=drive-scsi0,id=scsi0,device_id=drive-scsi0,bootindex=100,write-cache=on' \
++  -netdev 'type=tap,id=net0,ifname=tap8006i0,script=/usr/libexec/qemu-server/pve-bridge,downscript=/usr/libexec/qemu-server/pve-bridgedown,vhost=on' \
++  -device 'virtio-net-pci,mac=A2:C0:43:77:08:A0,netdev=net0,bus=pcie.0,addr=0x12,id=net0,rx_queue_size=1024,tx_queue_size=256,bootindex=300,host_mtu=1500,host_tunnel=off' \
++  -machine 'pflash0=pflash0,pflash1=drive-efidisk0,type=virt+pve0'
+diff --git a/src/test/cfg2cmd/riscv64/simple-riscv.conf b/src/test/cfg2cmd/riscv64/simple-riscv.conf
+new file mode 100644
+index 00000000..8c369851
+--- /dev/null
++++ b/src/test/cfg2cmd/riscv64/simple-riscv.conf
+@@ -0,0 +1,34 @@
++# TEST: Simple test for a basic configuration with riscv64 set as architecture, on the default
++# (x86_64) test host - exercises the same cross-architecture TCG path used for aarch64-on-x86_64,
++# plus the UART serial console and sysbus TPM device model fixed alongside riscv64 support.
++#
++# NOTE for whoever runs this fixture first: no `.cmd` golden file is committed alongside this
++# `.conf` yet, so the test harness (see do_test() in run_config2command_tests.pl) will silently
++# *write* one from whatever the code currently emits on first run, not validate anything. Before
++# committing the generated `simple-riscv.conf.cmd`, diff it line-by-line against
++# `../aarch64/simple-arm.conf.cmd` and confirm every difference is intentional (arch/binary name,
++# RISCV_VIRT_CODE/VARS.fd paths+size, `-cpu max`, the serial0/tpmstate0 lines this fixture adds
++# that the aarch64 one doesn't). In particular, the `virtio-gpu` display device choice
++# ($vga_map_no_legacy_vga in QemuServer.pm) was extended to riscv64 by analogy with aarch64's
++# existing behavior but was NOT independently verified against a real riscv64-capable QEMU
++# build (the QEMU binary used to verify the TPM device model and CPU list, from Debian's
++# qemu-system-riscv package, wasn't built with --enable-virglrenderer/--enable-opengl so it
++# has no virtio-gpu compiled in at all) - pay particular attention to that line.
++arch: riscv64
++bootdisk: scsi0
++bios: ovmf
++cores: 3
++ide2: none,media=cdrom
++memory: 768
++name: simple
++net0: virtio=A2:C0:43:77:08:A0,bridge=vmbr0
++numa: 0
++ostype: l26
++scsi0: local:8006/vm-8006-disk-0.qcow2,discard=on,size=104858K
++scsihw: virtio-scsi-pci
++serial0: socket
++smbios1: uuid=7b10d7af-b932-4c66-b2c3-3996152ec465
++sockets: 1
++vmgenid: c773c261-d800-4348-9f5d-167fadd53cf8
++efidisk0: local:8006/vm-8006-disk-1.qcow2,efitype=4m
++tpmstate0: local:8006/vm-8006-disk-2.raw,size=4M,version=v2.0
+diff --git a/src/test/cfg2cmd/riscv64/simple-riscv.conf.cmd b/src/test/cfg2cmd/riscv64/simple-riscv.conf.cmd
+new file mode 100644
+index 00000000..70f117a9
+--- /dev/null
++++ b/src/test/cfg2cmd/riscv64/simple-riscv.conf.cmd
+@@ -0,0 +1,46 @@
++/usr/bin/qemu-system-riscv64 \
++  -id 8006 \
++  -name simple \
++  -no-shutdown \
++  -chardev 'socket,id=qmp,path=/var/run/qemu-server/8006.qmp,server=on,wait=off' \
++  -mon 'chardev=qmp,mode=control' \
++  -chardev 'socket,id=qmp-event,path=/var/run/qmeventd.sock,reconnect-ms=5000' \
++  -mon 'chardev=qmp-event,mode=control' \
++  -pidfile /var/run/qemu-server/8006.pid \
++  -daemonize \
++  -smbios 'type=1,uuid=7b10d7af-b932-4c66-b2c3-3996152ec465' \
++  -object '{"id":"throttle-drive-efidisk0","limits":{},"qom-type":"throttle-group"}' \
++  -blockdev '{"driver":"raw","file":{"driver":"file","filename":"/usr/share/pve-edk2-firmware//RISCV_VIRT_CODE.fd"},"node-name":"pflash0","read-only":true}' \
++  -blockdev '{"detect-zeroes":"on","discard":"ignore","driver":"throttle","file":{"cache":{"direct":false,"no-flush":false},"detect-zeroes":"on","discard":"ignore","driver":"qcow2","file":{"aio":"io_uring","cache":{"direct":false,"no-flush":false},"detect-zeroes":"on","discard":"ignore","driver":"file","filename":"/var/lib/vz/images/8006/vm-8006-disk-1.qcow2","node-name":"e4abf08bba72d3a54b87a58d2f50906","read-only":false},"node-name":"f4abf08bba72d3a54b87a58d2f50906","read-only":false},"node-name":"drive-efidisk0","read-only":false,"throttle-group":"throttle-drive-efidisk0"}' \
++  -smp '3,sockets=1,cores=3,maxcpus=3' \
++  -nodefaults \
++  -boot 'menu=on,strict=on,reboot-timeout=1000,splash=/usr/share/qemu-server/bootsplash.jpg' \
++  -vnc 'unix:/var/run/qemu-server/8006.vnc,password=on' \
++  -cpu max \
++  -m 768 \
++  -object '{"id":"throttle-drive-scsi0","limits":{},"qom-type":"throttle-group"}' \
++  -device 'pci-bridge,id=pci.1,chassis_nr=1,bus=pcie.0,addr=0x1e' \
++  -device 'pci-bridge,id=pci.2,chassis_nr=2,bus=pcie.0,addr=0x1f' \
++  -device 'vmgenid,guid=c773c261-d800-4348-9f5d-167fadd53cf8' \
++  -device 'usb-ehci,id=ehci,bus=pcie.0,addr=0x1' \
++  -device 'usb-tablet,id=tablet,bus=ehci.0,port=1' \
++  -device 'usb-kbd,id=keyboard,bus=ehci.0,port=2' \
++  -chardev 'socket,id=serial0,path=/var/run/qemu-server/8006.serial0,server=on,wait=off' \
++  -serial chardev:serial0 \
++  -chardev 'socket,id=tpmchar,path=/var/run/qemu-server/8006.swtpm' \
++  -tpmdev 'emulator,id=tpmdev,chardev=tpmchar' \
++  -device 'tpm-tis-device,tpmdev=tpmdev' \
++  -device 'virtio-gpu,id=vga,bus=pcie.0,addr=0x2' \
++  -device 'virtio-serial,id=spice,bus=pcie.0,addr=0x9' \
++  -chardev 'spicevmc,id=vdagent,name=vdagent' \
++  -device 'virtserialport,chardev=vdagent,name=com.redhat.spice.0' \
++  -spice 'tls-port=61000,addr=127.0.0.1,tls-ciphers=HIGH,seamless-migration=on' \
++  -device 'virtio-balloon-pci,id=balloon0,bus=pcie.0,addr=0x3,free-page-reporting=on' \
++  -iscsi 'initiator-name=iqn.1993-08.org.debian:01:aabbccddeeff' \
++  -device 'ide-cd,bus=ide.1,unit=0,id=ide2,bootindex=200' \
++  -device 'virtio-scsi-pci,id=scsihw0,bus=pcie.0,addr=0x5' \
++  -blockdev '{"detect-zeroes":"unmap","discard":"unmap","driver":"throttle","file":{"cache":{"direct":true,"no-flush":false},"detect-zeroes":"unmap","discard":"unmap","driver":"qcow2","file":{"aio":"io_uring","cache":{"direct":true,"no-flush":false},"detect-zeroes":"unmap","discard":"unmap","driver":"file","filename":"/var/lib/vz/images/8006/vm-8006-disk-0.qcow2","node-name":"ecd04be4259153b8293415fefa2a84c","read-only":false},"node-name":"fcd04be4259153b8293415fefa2a84c","read-only":false},"node-name":"drive-scsi0","read-only":false,"throttle-group":"throttle-drive-scsi0"}' \
++  -device 'scsi-hd,bus=scsihw0.0,channel=0,scsi-id=0,lun=0,drive=drive-scsi0,id=scsi0,device_id=drive-scsi0,bootindex=100,write-cache=on' \
++  -netdev 'type=tap,id=net0,ifname=tap8006i0,script=/usr/libexec/qemu-server/pve-bridge,downscript=/usr/libexec/qemu-server/pve-bridgedown' \
++  -device 'virtio-net-pci,mac=A2:C0:43:77:08:A0,netdev=net0,bus=pcie.0,addr=0x12,id=net0,rx_queue_size=1024,tx_queue_size=256,bootindex=300,host_mtu=1500,host_tunnel=off' \
++  -machine 'pflash0=pflash0,pflash1=drive-efidisk0,accel=tcg,type=virt+pve0'
+diff --git a/src/test/cfg2cmd/riscv64/simple-x86-on-riscv-host.conf b/src/test/cfg2cmd/riscv64/simple-x86-on-riscv-host.conf
+new file mode 100644
+index 00000000..d0e4415d
+--- /dev/null
++++ b/src/test/cfg2cmd/riscv64/simple-x86-on-riscv-host.conf
+@@ -0,0 +1,18 @@
++# TEST: Simple test for a basic config with riscv64 set as the host arch and x86_64 as the VM arch
++# HOST_ARCH: riscv64
++arch: x86_64
++bootdisk: scsi0
++bios: ovmf
++cores: 3
++ide2: none,media=cdrom
++memory: 768
++name: simple
++net0: virtio=A2:C0:43:77:08:A0,bridge=vmbr0
++numa: 0
++ostype: l26
++scsi0: local:8006/vm-8006-disk-0.qcow2,discard=on,size=104858K
++scsihw: virtio-scsi-pci
++smbios1: uuid=7b10d7af-b932-4c66-b2c3-3996152ec465
++sockets: 1
++vmgenid: c773c261-d800-4348-9f5d-167fadd53cf8
++efidisk0: local:8006/vm-8006-disk-1.qcow2,efitype=4m
+diff --git a/src/test/cfg2cmd/riscv64/simple-x86-on-riscv-host.conf.cmd b/src/test/cfg2cmd/riscv64/simple-x86-on-riscv-host.conf.cmd
+new file mode 100644
+index 00000000..9e932d6b
+--- /dev/null
++++ b/src/test/cfg2cmd/riscv64/simple-x86-on-riscv-host.conf.cmd
+@@ -0,0 +1,38 @@
++/usr/bin/qemu-system-x86_64 \
++  -id 8006 \
++  -name simple \
++  -no-shutdown \
++  -chardev 'socket,id=qmp,path=/var/run/qemu-server/8006.qmp,server=on,wait=off' \
++  -mon 'chardev=qmp,mode=control' \
++  -chardev 'socket,id=qmp-event,path=/var/run/qmeventd.sock,reconnect-ms=5000' \
++  -mon 'chardev=qmp-event,mode=control' \
++  -pidfile /var/run/qemu-server/8006.pid \
++  -daemonize \
++  -smbios 'type=1,uuid=7b10d7af-b932-4c66-b2c3-3996152ec465' \
++  -object '{"id":"throttle-drive-efidisk0","limits":{},"qom-type":"throttle-group"}' \
++  -blockdev '{"driver":"raw","file":{"driver":"file","filename":"/usr/share/pve-edk2-firmware//OVMF_CODE_4M.fd"},"node-name":"pflash0","read-only":true}' \
++  -blockdev '{"detect-zeroes":"on","discard":"ignore","driver":"throttle","file":{"cache":{"direct":false,"no-flush":false},"detect-zeroes":"on","discard":"ignore","driver":"qcow2","file":{"aio":"io_uring","cache":{"direct":false,"no-flush":false},"detect-zeroes":"on","discard":"ignore","driver":"file","filename":"/var/lib/vz/images/8006/vm-8006-disk-1.qcow2","node-name":"e4abf08bba72d3a54b87a58d2f50906","read-only":false},"node-name":"f4abf08bba72d3a54b87a58d2f50906","read-only":false},"node-name":"drive-efidisk0","read-only":false,"throttle-group":"throttle-drive-efidisk0"}' \
++  -smp '3,sockets=1,cores=3,maxcpus=3' \
++  -nodefaults \
++  -boot 'menu=on,strict=on,reboot-timeout=1000,splash=/usr/share/qemu-server/bootsplash.jpg' \
++  -vnc 'unix:/var/run/qemu-server/8006.vnc,password=on' \
++  -cpu qemu64 \
++  -m 768 \
++  -object '{"id":"throttle-drive-scsi0","limits":{},"qom-type":"throttle-group"}' \
++  -global 'PIIX4_PM.disable_s3=1' \
++  -global 'PIIX4_PM.disable_s4=1' \
++  -device 'pci-bridge,id=pci.1,chassis_nr=1,bus=pci.0,addr=0x1e' \
++  -device 'pci-bridge,id=pci.2,chassis_nr=2,bus=pci.0,addr=0x1f' \
++  -device 'vmgenid,guid=c773c261-d800-4348-9f5d-167fadd53cf8' \
++  -device 'piix3-usb-uhci,id=uhci,bus=pci.0,addr=0x1.0x2' \
++  -device 'usb-tablet,id=tablet,bus=uhci.0,port=1' \
++  -device 'VGA,id=vga,bus=pci.0,addr=0x2' \
++  -device 'virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3,free-page-reporting=on' \
++  -iscsi 'initiator-name=iqn.1993-08.org.debian:01:aabbccddeeff' \
++  -device 'ide-cd,bus=ide.1,unit=0,id=ide2,bootindex=200' \
++  -device 'virtio-scsi-pci,id=scsihw0,bus=pci.0,addr=0x5' \
++  -blockdev '{"detect-zeroes":"unmap","discard":"unmap","driver":"throttle","file":{"cache":{"direct":true,"no-flush":false},"detect-zeroes":"unmap","discard":"unmap","driver":"qcow2","file":{"aio":"io_uring","cache":{"direct":true,"no-flush":false},"detect-zeroes":"unmap","discard":"unmap","driver":"file","filename":"/var/lib/vz/images/8006/vm-8006-disk-0.qcow2","node-name":"ecd04be4259153b8293415fefa2a84c","read-only":false},"node-name":"fcd04be4259153b8293415fefa2a84c","read-only":false},"node-name":"drive-scsi0","read-only":false,"throttle-group":"throttle-drive-scsi0"}' \
++  -device 'scsi-hd,bus=scsihw0.0,channel=0,scsi-id=0,lun=0,drive=drive-scsi0,id=scsi0,device_id=drive-scsi0,bootindex=100,write-cache=on' \
++  -netdev 'type=tap,id=net0,ifname=tap8006i0,script=/usr/libexec/qemu-server/pve-bridge,downscript=/usr/libexec/qemu-server/pve-bridgedown' \
++  -device 'virtio-net-pci,mac=A2:C0:43:77:08:A0,netdev=net0,bus=pci.0,addr=0x12,id=net0,rx_queue_size=1024,tx_queue_size=256,bootindex=300,host_mtu=1500,host_tunnel=off' \
++  -machine 'pflash0=pflash0,pflash1=drive-efidisk0,hpet=off,accel=tcg,type=pc+pve0'
+-- 
+2.47.3
+
