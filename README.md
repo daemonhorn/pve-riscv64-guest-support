@@ -37,6 +37,9 @@ package pool of the ISO that was installed onto real hardware and verified (see
 - **[RISCV64_GUEST_SUPPORT_PLAN.md](RISCV64_GUEST_SUPPORT_PLAN.md)** — the original
   implementation plan.
 - **[ISO_BUILD_SCOPE.md](ISO_BUILD_SCOPE.md)** — scoping analysis for building a release ISO.
+- **[UPSTREAM_SUBMISSION_PLAN.md](UPSTREAM_SUBMISSION_PLAN.md)** — gap analysis and
+  checklist for mailing this as a `pve-devel` patch series: commit splitting, CLA,
+  bugzilla, code-quality gates, and send order.
 
 ## Notable findings
 
@@ -62,4 +65,6 @@ just firmware.
 
 Upstream contribution note: Proxmox accepts patches via its mailing list
 (`git send-email`), not pull requests. These commits would want splitting into smaller
-reviewable pieces before submission.
+reviewable pieces before submission — see
+[UPSTREAM_SUBMISSION_PLAN.md](UPSTREAM_SUBMISSION_PLAN.md) for the full gap list (missing
+sign-offs, CLA, bugzilla tracking, commit splitting, lint gates) and a sequenced checklist.
