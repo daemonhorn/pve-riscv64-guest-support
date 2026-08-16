@@ -56,8 +56,24 @@ defaults, CPU-model validation, BIOS rendering.
 | 5 | 4 uninitialized EDK2 submodules | Real firmware build | Firmware build fails |
 | 6 | **OpenSBI blob purged by `riscv.*` glob** | `qm start` on real install | **No riscv64 guest can ever boot** |
 | 7 | Identical version strings to stock | Upstream ISO comparison | `apt upgrade` silently strips riscv64 support |
+| 8 | `ide-cd` emitted with `bus=ide.N` on virt machines | Booting a real guest ISO | **CD-ROM unusable on riscv64 *and* aarch64** |
+| 9 | EDK2 publishes ACPI but not FDT | Booting FreeBSD riscv64 | FDT-based guest OSes cannot boot |
 
-Bugs 2, 3, 5, 6 were only discoverable by actually building and running — not by code review.
+Bugs 2, 3, 5, 6, 8, 9 were only discoverable by actually building and running — not by code review.
+
+**Bugs 8 and 9 are open** (found late; see §6). Both are worth noting for their breadth:
+
+- **#8 is pre-existing and not riscv64-specific.** `DriveDevice.pm` emits `bus=ide.$controller`
+  unconditionally, but QEMU's virt machine has no IDE bus, so `-device ide-cd,bus=ide.1` fails with
+  `Bus 'ide.1' not found`. **aarch64 is affected identically.** It escaped the test suite because
+  the cfg2cmd fixtures compare generated command *strings* and never launch QEMU — a real coverage
+  limitation worth knowing about. The web UI already hides IDE for virt-machine architectures, so
+  this is reachable via the API/CLI but not the GUI. Workaround: use SATA (PVE correctly emits
+  `-device ahci,id=ahci0,multifunction=on,bus=pcie.0,addr=0x7`).
+- **#9:** QEMU offers ACPI by default, so `PlatformHasAcpiDtDxe` installs the ACPI protocol and
+  `FdtClientDxe` never calls `InstallConfigurationTable(&gFdtTableGuid, …)`. FreeBSD riscv64
+  requires FDT and dies with `No valid device tree blob found!`. Workaround without rebuilding
+  firmware: `args: -machine acpi=off`. Proper fix: build the firmware with `PcdForceNoAcpi=TRUE`.
 
 ---
 
@@ -186,11 +202,49 @@ in-place package upgrade (UEFI).
 
 ---
 
+## 5b. A real riscv64 OS boots — FreeBSD 15.1
+
+FreeBSD 15.1-RELEASE riscv64 boots to a root shell on a riscv64 guest, via the full chain
+OpenSBI v1.7 → our EDK2 → FreeBSD EFI loader → kernel:
+
+```
+FreeBSD 15.1-RELEASE releng/15.1-n283562-96841ea08dcf GENERIC riscv
+EFI Firmware: Proxmox distribution of EDK II
+real memory  = 2147090432 (2047 MB)
+FreeBSD/SMP: Multiprocessor System Detected: 2 CPUs
+ahci0: <Intel ICH9 AHCI SATA controller> ... AHCI v1.00 with 6 1.5Gbps ports
+ada0: <QEMU HARDDISK 2.5+> ATA-7 SATA device ... 16384MB
+vtnet0: ... status: active
+```
+
+`sysctl -n hw.machine_arch` → **`riscv64`**. Kernel, disk (AHCI), and network (virtio-net) all
+functional. Requires `args: -machine acpi=off` pending the bug-9 firmware fix.
+
+**The disk install was not completed.** Not a riscv64 defect: `bsdinstall`'s dialog TUI cannot
+initialize over this serial link (`ncurses: cannot initialize terminal type`), and the fallback to
+a scripted install is blocked by lossy serial input — at 0.3 s/character, `ls /usr/freebsd-dist`
+still arrived as `ls /us/free\x00sd-di`. The guest console is "Video Primary, Serial Secondary" and
+root login on `ttyu0` is refused (console marked insecure). The recommended path is a
+`mini-memstick` with an `/etc/installerconfig` baked in, avoiding interactive input entirely.
+
+Two media findings from the attempt: FreeBSD 15.1 riscv64 GENERIC attaches no `cd0` (only `pass0`),
+so it cannot mount its own `disc1.iso` install media; and while `virtio_pci` binds, there is **no
+`vtscsi0` child** — the virtio-scsi driver is absent, though virtio-net works. Hence memstick-on-SATA.
+
+---
+
 ## 6. Known gaps / follow-up
 
-- **Not verified:** live migration, backup/restore, guest-agent against a *running* riscv64 guest
-  OS; cluster operations. These need a guest OS actually installed, not just firmware. Booting a
-  real riscv64 OS (e.g. FreeBSD 15.1 riscv64) is the natural next step and is now unblocked.
+- **Bug 8 (open, affects aarch64 too):** `ide-cd` is emitted with `bus=ide.N` on virt machines,
+  which have no IDE bus. Needs a decision on correct behaviour — reject `ide*` at the API layer for
+  virt-machine architectures (matching what the web UI already does), or transparently map it to
+  the AHCI/SATA controller. Fixing it also means the cfg2cmd suite should gain a case that would
+  have caught it.
+- **Bug 9 (open):** rebuild `pve-edk2-firmware` with `PcdForceNoAcpi=TRUE` so FDT-based guests
+  (FreeBSD, some Linux configs) boot without needing `-machine acpi=off` per VM.
+- **Not verified:** live migration, backup/restore, guest-agent against a *fully installed* riscv64
+  guest OS; cluster operations. A booted FreeBSD riscv64 kernel is proven; completing an unattended
+  install (mini-memstick + `installerconfig`) is the prerequisite for the rest.
 - **Unexplained non-fatal EDK2 error.** The riscv64 EDK2 firmware emits
   `ERROR: C40000002:V03051002` before BdsDxe on both test systems. Firmware continues normally and
   reaches the Boot Manager, so it is not blocking — but the root cause was not chased and is worth
